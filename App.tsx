@@ -4,11 +4,13 @@ import type { Wall, Floor, FramingMaterials, WallDetails, Point, StudSize, Heade
 import WallEditor from './components/WallEditor';
 import PdfViewer from './components/PdfViewer';
 import Project3DViewer from './components/Project3DViewer';
+import PopOutWindow from './components/PopOutWindow';
 import { calculateProjectMaterials } from './services/calculationService';
 import { getProTip } from './services/geminiService';
 import { generateMaterialListPdf, generateMaterialReportPdf, drawWallOnCanvas } from './services/pdfService';
 import { generateSketchUpScript } from './services/sketchupService';
-import { PlusIcon, TrashIcon, EditIcon, DuplicateIcon, ProjectIcon, DownloadIcon, PdfIcon, CloseIcon, CubeIcon, MapPinIcon, DocumentReportIcon, AssemblyViewIcon, SketchupIcon, SaveIcon, LoadIcon, ChevronDownIcon, ChevronRightIcon, ArrowRightIcon, ArrowLeftIcon, GripVerticalIcon, SparklesIcon, FolderIcon } from './components/Icons';
+import { generatePlyModel } from './services/exportService';
+import { PlusIcon, TrashIcon, EditIcon, DuplicateIcon, ProjectIcon, DownloadIcon, PdfIcon, CloseIcon, CubeIcon, MapPinIcon, DocumentReportIcon, AssemblyViewIcon, SketchupIcon, SaveIcon, LoadIcon, ChevronDownIcon, ChevronRightIcon, ArrowRightIcon, ArrowLeftIcon, GripVerticalIcon, SparklesIcon, FolderIcon, ClipboardCopyIcon, ClipboardPasteIcon } from './components/Icons';
 
 const generateId = () => `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -161,7 +163,7 @@ const fileToDataUrl = (file: File): Promise<string> => {
 const PdfOptionsModal: React.FC<{
     isOpen: boolean;
     onClose: () => void;
-    onGenerate: (format: 'both' | 'breakdown' | 'consolidated') => void;
+    onGenerate: (format: 'both' | 'breakdown' | 'consolidated' | 'by-floor') => void;
 }> = ({ isOpen, onClose, onGenerate }) => {
     if (!isOpen) return null;
     return (
@@ -174,13 +176,17 @@ const PdfOptionsModal: React.FC<{
                         <h3 className="font-semibold">Consolidated List Only</h3>
                         <p className="text-sm text-slate-400">A single, combined list of all materials for the project.</p>
                     </button>
+                    <button onClick={() => onGenerate('by-floor')} className="w-full text-left p-3 bg-slate-700 hover:bg-indigo-600 rounded-lg transition">
+                        <h3 className="font-semibold">By Floor List</h3>
+                        <p className="text-sm text-slate-400">Material lists aggregated by floor.</p>
+                    </button>
                     <button onClick={() => onGenerate('breakdown')} className="w-full text-left p-3 bg-slate-700 hover:bg-indigo-600 rounded-lg transition">
                         <h3 className="font-semibold">Breakdown by Wall Only</h3>
                         <p className="text-sm text-slate-400">A separate material list for each individual wall.</p>
                     </button>
                     <button onClick={() => onGenerate('both')} className="w-full text-left p-3 bg-slate-700 hover:bg-indigo-600 rounded-lg transition">
-                        <h3 className="font-semibold">Both Lists</h3>
-                        <p className="text-sm text-slate-400">Includes both the breakdown by wall and the consolidated total.</p>
+                        <h3 className="font-semibold">Full Report</h3>
+                        <p className="text-sm text-slate-400">Includes all lists and breakdowns.</p>
                     </button>
                 </div>
                  <div className="flex justify-end mt-8">
@@ -300,7 +306,9 @@ const BulkEditPanel: React.FC<{
     onApply: (changes: { studSize?: StudSize; headerSize?: HeaderSize; headerPly?: 2 | 3; studsOnCenter?: 1 | 2 | 3 | 4; blockingRows?: number; sheathing?: boolean; floorId?: string }) => void;
     onClear: () => void;
     style?: React.CSSProperties;
-}> = ({ selectedCount, floors, onApply, onClear, style }) => {
+    clipboardDetails: WallDetails | null;
+    onPasteProperties: () => void;
+}> = ({ selectedCount, floors, onApply, onClear, style, clipboardDetails, onPasteProperties }) => {
     const [studSize, setStudSize] = useState<StudSize | ''>('');
     const [headerSize, setHeaderSize] = useState<HeaderSize | ''>('');
     const [headerPly, setHeaderPly] = useState<number | ''>('');
@@ -412,6 +420,11 @@ const BulkEditPanel: React.FC<{
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
+                    {clipboardDetails && (
+                         <button onClick={onPasteProperties} className="px-5 py-2 bg-purple-600 text-white font-semibold rounded-lg hover:bg-purple-700 transition flex items-center gap-2" title="Paste Copied Properties to Selected Walls">
+                            <ClipboardPasteIcon className="w-5 h-5"/> Paste Props
+                        </button>
+                    )}
                     <button onClick={handleApply} className="px-5 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition">Apply</button>
                     <button onClick={onClear} className="px-5 py-2 bg-slate-600 text-white font-semibold rounded-lg hover:bg-slate-500 transition">Cancel</button>
                 </div>
@@ -459,7 +472,7 @@ const App: React.FC = () => {
     const [highlightedWallId, setHighlightedWallId] = useState<string | null>(null);
     const [clickedWallId, setClickedWallId] = useState<string | null>(null);
     const [wallToFocusId, setWallToFocusId] = useState<string | null>(null);
-    const [showMaterialBreakdown, setShowMaterialBreakdown] = useState(true);
+    const [materialViewMode, setMaterialViewMode] = useState<'total' | 'floor' | 'wall'>('total');
     const [copiedWallDetails, setCopiedWallDetails] = useState<Wall | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [pdfPanelWidth, setPdfPanelWidth] = useState(Math.max(window.innerWidth * 0.4, 400));
@@ -482,6 +495,11 @@ const App: React.FC = () => {
     type DragPosition = 'above' | 'on' | 'below';
     const [dragOverState, setDragOverState] = useState<{ targetId: string; position: DragPosition } | null>(null);
 
+    // Property Copy/Paste
+    const [propertyClipboard, setPropertyClipboard] = useState<WallDetails | null>(null);
+    
+    // Pop Out Window State
+    const [isPdfDetached, setIsPdfDetached] = useState(false);
 
     const getDescendantIds = useCallback((parentId: string): string[] => findDescendantIds(parentId, walls), [walls]);
     
@@ -491,7 +509,12 @@ const App: React.FC = () => {
         while(currentWall && currentWall.parentId) {
             const pId = currentWall.parentId;
             ancestors.push(pId);
-            currentWall = walls.find(w => w.id === pId);
+            const parent = walls.find(w => w.id === pId);
+            if (parent) {
+                currentWall = parent;
+            } else {
+                break;
+            }
         }
         return ancestors;
     }, [walls]);
@@ -552,6 +575,42 @@ const App: React.FC = () => {
                 return wall;
             })
         );
+        setSelectedWallIds(new Set());
+    };
+
+    const handleCopyWallProperties = (wall: Wall) => {
+        // We copy details but exclude things like length and openings which are specific to the instance
+        const detailsToCopy = { ...wall.details };
+        setPropertyClipboard(detailsToCopy);
+    };
+
+    const handlePastePropertiesToSelected = () => {
+        if (!propertyClipboard || selectedWallIds.size === 0) return;
+
+        setWalls(prevWalls => prevWalls.map(wall => {
+            if (selectedWallIds.has(wall.id)) {
+                return {
+                    ...wall,
+                    details: {
+                        ...wall.details,
+                        // Apply copied properties but preserve geometry/instance specific fields
+                        wallHeight: propertyClipboard.wallHeight,
+                        studSize: propertyClipboard.studSize,
+                        studSpacing: propertyClipboard.studSpacing,
+                        studsOnCenter: propertyClipboard.studsOnCenter,
+                        doubleTopPlate: propertyClipboard.doubleTopPlate,
+                        pressureTreatedBottomPlate: propertyClipboard.pressureTreatedBottomPlate,
+                        blockingRows: propertyClipboard.blockingRows,
+                        sheathing: propertyClipboard.sheathing,
+                        sheathingType: propertyClipboard.sheathingType,
+                        startStuds: propertyClipboard.startStuds,
+                        endStuds: propertyClipboard.endStuds,
+                        // Preserve original length and openings
+                    }
+                };
+            }
+            return wall;
+        }));
         setSelectedWallIds(new Set());
     };
 
@@ -781,24 +840,26 @@ const App: React.FC = () => {
         }
         setIsLoading(true);
         try {
-            const { list, byWall } = calculateProjectMaterials(walls);
+            const { list, byWall, byFloor } = calculateProjectMaterials(walls, floors);
             const proTip = await getProTip(walls);
             const totalLinearFeet = walls.reduce((acc, wall) => acc + wall.details.wallLength, 0) / 12;
 
             setMaterials({
                 list,
                 byWall,
+                byFloor,
                 proTip,
                 totalWalls: walls.length,
                 totalLinearFeet: Math.round(totalLinearFeet),
             });
         } catch (error) {
             console.error("Failed to calculate materials or get pro tip:", error);
-            const { list, byWall } = calculateProjectMaterials(walls);
+            const { list, byWall, byFloor } = calculateProjectMaterials(walls, floors);
              const totalLinearFeet = walls.reduce((acc, wall) => acc + wall.details.wallLength, 0) / 12;
             setMaterials({
                 list,
                 byWall,
+                byFloor,
                 proTip: 'Could not retrieve a pro tip. Please check your API key and connection.',
                 totalWalls: walls.length,
                 totalLinearFeet: Math.round(totalLinearFeet),
@@ -806,7 +867,7 @@ const App: React.FC = () => {
         } finally {
             setIsLoading(false);
         }
-    }, [walls]);
+    }, [walls, floors]);
 
     const handleDownloadPdfClick = () => {
         if (materials) {
@@ -814,7 +875,7 @@ const App: React.FC = () => {
         }
     };
     
-    const handleGeneratePdfWithOptions = (format: 'both' | 'breakdown' | 'consolidated') => {
+    const handleGeneratePdfWithOptions = (format: 'both' | 'breakdown' | 'consolidated' | 'by-floor') => {
         if (materials) {
             generateMaterialListPdf(walls, materials, format);
         }
@@ -845,6 +906,20 @@ const App: React.FC = () => {
         URL.revokeObjectURL(url);
     };
 
+    const handleExportPly = () => {
+        if (walls.length === 0) return;
+        const plyContent = generatePlyModel(walls, floors);
+        const blob = new Blob([plyContent], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'framing_project_web_viewer.ply';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
     const handlePdfImport = (event: React.ChangeEvent<HTMLInputElement>) => {
         if (event.target.files && event.target.files[0]) {
             const file = event.target.files[0];
@@ -861,6 +936,7 @@ const App: React.FC = () => {
             return next;
         });
         setWallToPlace(null);
+        setIsPdfDetached(false);
     };
 
     const handleSaveProject = async () => {
@@ -905,7 +981,7 @@ const App: React.FC = () => {
         setHighlightedWallId(null);
         setClickedWallId(null);
         setWallToFocusId(null);
-        setShowMaterialBreakdown(true);
+        setMaterialViewMode('total');
         setCopiedWallDetails(null);
         setIsPdfOptionsModalOpen(false);
         setCollapsedParents({});
@@ -916,6 +992,8 @@ const App: React.FC = () => {
         setDragOverState(null);
         setPdfScales({});
         setCollapsedFloors({});
+        setPropertyClipboard(null);
+        setIsPdfDetached(false);
     };
 
     const handleCloseProject = () => {
@@ -995,6 +1073,8 @@ const App: React.FC = () => {
                 setClickedWallId(null);
                 setPdfPageNum(1);
                 setCollapsedFloors({});
+                setPropertyClipboard(null);
+                setIsPdfDetached(false);
                 
             } catch (error) {
                 console.error("Failed to load project:", error);
@@ -1095,6 +1175,10 @@ const App: React.FC = () => {
         setPdfScales(prev => ({ ...prev, [pageNum]: scale }));
     };
 
+    const handleTogglePdfDetach = () => {
+        setIsPdfDetached(prev => !prev);
+    };
+
     // Prepare wall data grouped by floors for the "Roll up" view
     const wallsByFloor = useMemo(() => {
         const grouped: Record<string, { wall: Wall; children: any[] }[]> = {};
@@ -1188,9 +1272,13 @@ const App: React.FC = () => {
 
     const handleDragOver = (e: React.DragEvent, wallId: string) => {
         e.preventDefault();
-        if (draggedId === null || draggedId === wallId) {
-            if (dragOverState !== null) setDragOverState(null);
-            return;
+        // Allow dropping if we are not dragging over ourselves, OR if we have a multi-selection and we are hovering something not in selection
+        const isSelf = draggedId === wallId;
+        const inSelection = selectedWallIds.has(wallId) && selectedWallIds.has(draggedId || '');
+        
+        if (draggedId === null || (isSelf && !inSelection)) {
+             if (dragOverState !== null) setDragOverState(null);
+             return;
         }
 
         const targetElement = e.currentTarget as HTMLElement;
@@ -1222,44 +1310,82 @@ const App: React.FC = () => {
         }
 
         const { targetId, position } = dragOverState;
-        if (draggedId === targetId) {
-            handleDragEnd();
-            return;
+        
+        // Determine items to move: either the single dragged item, OR all selected items if the dragged item is part of the selection
+        const idsToMove = (selectedWallIds.has(draggedId)) 
+            ? Array.from(selectedWallIds) 
+            : [draggedId];
+
+        // Validation: Cannot drop onto itself or into a descendant of any moving item
+        if (idsToMove.includes(targetId)) {
+             handleDragEnd();
+             return;
         }
 
-        const descendantIdsOfDragged = findDescendantIds(draggedId, walls);
-        if (descendantIdsOfDragged.includes(targetId)) {
-            handleDragEnd();
-            return;
+        // Check if target is a descendant of ANY of the moving items
+        for (const movingId of idsToMove) {
+             const descendants = findDescendantIds(movingId, walls);
+             if (descendants.includes(targetId)) {
+                 handleDragEnd();
+                 return;
+             }
         }
 
         let updatedWalls = [...walls];
-        const draggedItem = updatedWalls.find(w => w.id === draggedId)!;
         const targetItem = updatedWalls.find(w => w.id === targetId)!;
-
-        // Auto-assign floor if dragging across floors (simplistic assumption: adopt target's floor)
-        const targetFloorId = targetItem.floorId || floors[0].id;
-        draggedItem.floorId = targetFloorId;
-
-        updatedWalls = updatedWalls.filter(w => w.id !== draggedId);
-
+        
+        // Determine Target Parent and Insertion Index
+        let newParentId: string | null = null;
+        let insertIndex = -1;
+        
         if (position === 'on') {
-            draggedItem.parentId = targetId;
+            newParentId = targetId;
+            // Insert at the end of target's children
             const targetDescendants = findDescendantIds(targetId, updatedWalls);
             const lastDescendantId = targetDescendants.length > 0 ? targetDescendants[targetDescendants.length - 1] : targetId;
-            const insertionIndex = updatedWalls.findIndex(w => w.id === lastDescendantId);
-            updatedWalls.splice(insertionIndex + 1, 0, draggedItem);
+            insertIndex = updatedWalls.findIndex(w => w.id === lastDescendantId) + 1;
         } else {
-            draggedItem.parentId = targetItem.parentId;
+            newParentId = targetItem.parentId || null;
             const targetIndex = updatedWalls.findIndex(w => w.id === targetId);
-            if (position === 'above') {
-                updatedWalls.splice(targetIndex, 0, draggedItem);
-            } else {
-                updatedWalls.splice(targetIndex + 1, 0, draggedItem);
-            }
+            insertIndex = position === 'above' ? targetIndex : targetIndex + 1;
         }
+
+        // Filter out moving items from list to prepare for re-insertion
+        const movingItems = idsToMove.map(id => updatedWalls.find(w => w.id === id)!).filter(Boolean);
+        updatedWalls = updatedWalls.filter(w => !idsToMove.includes(w.id));
+        
+        // Adjust insertion index because removing items might have shifted indices
+        // We can't rely on simple index math if items were removed before the target.
+        // Re-find the insertion point in the cleaned array.
+        if (position === 'on') {
+             // For 'on', we just append to children. Need to find where the parent (or its last child) is now.
+             // If parent was moved, this case is impossible (checked above).
+             const targetDescendants = findDescendantIds(targetId, updatedWalls);
+             const lastDescendantId = targetDescendants.length > 0 ? targetDescendants[targetDescendants.length - 1] : targetId;
+             const idx = updatedWalls.findIndex(w => w.id === lastDescendantId);
+             insertIndex = idx + 1;
+        } else {
+             // Sibling move
+             const tIdx = updatedWalls.findIndex(w => w.id === targetId);
+             insertIndex = position === 'above' ? tIdx : tIdx + 1;
+        }
+
+        // Apply updates to moving items
+        movingItems.forEach(item => {
+            item.parentId = newParentId;
+            // Update floor to match target if simplified logic desires, or keep original?
+            // User requested "combine them into folders", implying grouping. 
+            // Usually grouping implies being on the same floor.
+            item.floorId = targetItem.floorId || floors[0].id;
+        });
+
+        // Insert items
+        updatedWalls.splice(insertIndex, 0, ...movingItems);
+
         setWalls(updatedWalls);
         handleDragEnd();
+        // Optionally clear selection after move? User might want to keep selection to move again.
+        // setSelectedWallIds(new Set()); 
     };
 
     const WallRow: React.FC<{ 
@@ -1270,7 +1396,8 @@ const App: React.FC = () => {
         onToggleSelection: (id: string) => void;
         onWallClick: (id: string) => void;
         onUpdateFloor: (wallId: string, floorId: string) => void;
-    }> = ({ node, selectedIds, isClicked, floors, onToggleSelection, onWallClick, onUpdateFloor }) => {
+        onCopyProperties: (wall: Wall) => void;
+    }> = ({ node, selectedIds, isClicked, floors, onToggleSelection, onWallClick, onUpdateFloor, onCopyProperties }) => {
         const { wall, level } = node;
         const descendants = useMemo(() => getDescendantIds(wall.id), [wall.id, getDescendantIds]);
         const children = walls.filter(w => w.parentId === wall.id);
@@ -1281,7 +1408,7 @@ const App: React.FC = () => {
         const selectedDescendantsCount = useMemo(() => descendants.filter(id => selectedIds.has(id)).length, [descendants, selectedIds]);
         const isIndeterminate = !isSelected && isParent && selectedDescendantsCount > 0;
 
-        const isBeingDragged = draggedId === wall.id;
+        const isBeingDragged = draggedId === wall.id || (selectedIds.has(wall.id) && selectedIds.has(draggedId || ''));
         const isDragTarget = dragOverState?.targetId === wall.id;
         
         const floorId = wall.floorId || floors[0].id;
@@ -1388,6 +1515,7 @@ const App: React.FC = () => {
                 <td className="p-3">
                     <div className="flex items-center gap-1">
                          {activePdfFile && !wall.pdfPosition && (<button onClick={(e) => { e.stopPropagation(); setWallToPlace(wall);}} className="p-1.5 text-slate-400 hover:text-purple-400 rounded hover:bg-slate-700" title="Place on Plan"><MapPinIcon className="w-4 h-4"/></button>)}
+                        <button onClick={(e) => { e.stopPropagation(); onCopyProperties(wall); }} className="p-1.5 text-slate-400 hover:text-blue-400 rounded hover:bg-slate-700" title="Copy Properties"><ClipboardCopyIcon className="w-4 h-4"/></button>
                         <button onClick={(e) => { e.stopPropagation(); setAssemblyWall(wall); }} className="p-1.5 text-slate-400 hover:text-cyan-400 rounded hover:bg-slate-700" title="Assembly View"><AssemblyViewIcon className="w-4 h-4"/></button>
                         <button onClick={(e) => { e.stopPropagation(); handleDuplicateWall(wall);}} className="p-1.5 text-slate-400 hover:text-indigo-400 rounded hover:bg-slate-700" title="Duplicate Wall"><DuplicateIcon className="w-4 h-4"/></button>
                         <button onClick={(e) => { e.stopPropagation(); setSelectedWall(wall);}} className="p-1.5 text-slate-400 hover:text-indigo-400 rounded hover:bg-slate-700" title="Edit Wall"><EditIcon className="w-4 h-4"/></button>
@@ -1423,13 +1551,47 @@ const App: React.FC = () => {
                 onDeleteFloor={handleDeleteFloor}
                 currentPage={pdfPageNum}
             />
+            
+            {activePdfFile && isPdfDetached && (
+                <PopOutWindow title="Framing Plan Viewer" onClose={handleTogglePdfDetach}>
+                     <PdfViewer 
+                        file={activePdfFile} 
+                        onClose={handlePdfClose} // In popup, close means remove PDF entirely? Or just close popup? Close button in popup calls onClose -> handlePdfClose -> removes PDF.
+                        // Wait, user might just want to close the popup and attach back.
+                        // The 'onClose' prop in PdfViewer currently removes the file.
+                        // We should probably change PdfViewer header close button behavior if detached.
+                        onAddWall={handleAddWallFromPdf}
+                        projectWalls={walls.filter(w => w.floorId === activeFloorId || (!w.floorId && activeFloorId === floors[0]?.id))}
+                        wallToPlace={wallToPlace}
+                        onWallPlaced={handleWallPlaced}
+                        highlightedWallId={highlightedWallId}
+                        clickedWallId={clickedWallId}
+                        setClickedWallId={handleSetClickedWall}
+                        wallToFocusId={wallToFocusId}
+                        onFocusDone={() => setWallToFocusId(null)}
+                        onCopyWallDetails={handleCopyWallDetails}
+                        onPasteWallDetails={handlePasteWallDetails}
+                        selectedPdfWallIds={selectedPdfWallIds}
+                        setSelectedPdfWallIds={setSelectedPdfWallIds}
+                        copiedLayout={copiedLayout}
+                        onCopyLayout={handleCopyLayout}
+                        onPasteLayout={handlePasteLayout}
+                        currentPage={pdfPageNum}
+                        onPageChange={setPdfPageNum}
+                        savedScales={pdfScales}
+                        onSetScale={handleSetScale}
+                        onDetach={handleTogglePdfDetach}
+                        isDetached={true}
+                    />
+                </PopOutWindow>
+            )}
 
             {selectedWall ? (
-                <div className="p-4 md:p-8" style={{ marginLeft: activePdfFile ? `${pdfPanelWidth}px` : 0, transition: 'margin-left 0.1s ease-out' }}>
+                <div className="p-4 md:p-8" style={{ marginLeft: (activePdfFile && !isPdfDetached) ? `${pdfPanelWidth}px` : 0, transition: 'margin-left 0.1s ease-out' }}>
                     <WallEditor wall={selectedWall} onSave={handleSaveWall} onCancel={() => setSelectedWall(null)} />
                 </div>
             ) : (
-                <div style={{ marginLeft: activePdfFile ? `${pdfPanelWidth}px` : 0, transition: 'margin-left 0.1s ease-out' }}>
+                <div style={{ marginLeft: (activePdfFile && !isPdfDetached) ? `${pdfPanelWidth}px` : 0, transition: 'margin-left 0.1s ease-out' }}>
                     <header className="bg-slate-800/50 backdrop-blur-sm sticky top-0 z-10 border-b border-slate-700/50">
                         <div className="container mx-auto p-4 flex justify-between items-center">
                             <h1 className="text-2xl md:text-3xl font-bold text-indigo-400 flex items-center gap-3"><ProjectIcon className="w-8 h-8"/>Framing Calculator Pro</h1>
@@ -1457,6 +1619,9 @@ const App: React.FC = () => {
                                  </label>
                                 <button onClick={handleExportSketchUpScript} disabled={walls.length === 0} className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition disabled:bg-slate-600 disabled:cursor-not-allowed">
                                     <SketchupIcon className="w-5 h-5" /><span className="hidden sm:inline">SketchUp</span>
+                                </button>
+                                <button onClick={handleExportPly} disabled={walls.length === 0} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition disabled:bg-slate-600 disabled:cursor-not-allowed" title="Export for Web Viewer (3dviewer.net)">
+                                    <CubeIcon className="w-5 h-5" /><span className="hidden sm:inline">Web 3D</span>
                                 </button>
                             </div>
                         </div>
@@ -1545,6 +1710,7 @@ const App: React.FC = () => {
                                                                         onToggleSelection={handleToggleWallSelection}
                                                                         onWallClick={handleSetClickedWall}
                                                                         onUpdateFloor={handleUpdateWallFloor}
+                                                                        onCopyProperties={handleCopyWallProperties}
                                                                     />
                                                                 ))}
                                                             </>
@@ -1571,6 +1737,7 @@ const App: React.FC = () => {
                                                                     onToggleSelection={handleToggleWallSelection}
                                                                     onWallClick={handleSetClickedWall}
                                                                     onUpdateFloor={handleUpdateWallFloor}
+                                                                    onCopyProperties={handleCopyWallProperties}
                                                                  />
                                                              ))}
                                                         </>
@@ -1591,9 +1758,10 @@ const App: React.FC = () => {
                                 {materials ? (
                                     <div className="mt-6">
                                         <div className="flex justify-between items-center mb-4">
-                                            <div className="flex items-baseline gap-4">
-                                                <h3 className={`text-xl font-semibold cursor-pointer ${showMaterialBreakdown ? 'text-white' : 'text-slate-500'}`} onClick={() => setShowMaterialBreakdown(true)}>Breakdown</h3>
-                                                <h3 className={`text-xl font-semibold cursor-pointer ${!showMaterialBreakdown ? 'text-white' : 'text-slate-500'}`} onClick={() => setShowMaterialBreakdown(false)}>Total</h3>
+                                            <div className="flex items-baseline gap-4 text-sm">
+                                                <h3 className={`font-semibold cursor-pointer ${materialViewMode === 'total' ? 'text-white border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'}`} onClick={() => setMaterialViewMode('total')}>Total</h3>
+                                                <h3 className={`font-semibold cursor-pointer ${materialViewMode === 'floor' ? 'text-white border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'}`} onClick={() => setMaterialViewMode('floor')}>By Floor</h3>
+                                                <h3 className={`font-semibold cursor-pointer ${materialViewMode === 'wall' ? 'text-white border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'}`} onClick={() => setMaterialViewMode('wall')}>By Wall</h3>
                                             </div>
                                             <div className="flex items-center gap-3">
                                                 <button onClick={handleDownloadPdfClick} className="flex items-center gap-2 text-sm text-indigo-400 hover:text-indigo-300" title="Download Material List (Text Only)"><DownloadIcon className="w-5 h-5"/></button>
@@ -1601,7 +1769,7 @@ const App: React.FC = () => {
                                             </div>
                                         </div>
                                         <div className="max-h-96 overflow-y-auto pr-2 mb-4 custom-scrollbar">
-                                            {showMaterialBreakdown ? (
+                                            {materialViewMode === 'wall' && (
                                                 <div className="space-y-4">
                                                     {Object.keys(materials.byWall).map((wallId) => {
                                                         const wallData = materials.byWall[wallId];
@@ -1623,7 +1791,31 @@ const App: React.FC = () => {
                                                         );
                                                     })}
                                                 </div>
-                                            ) : (
+                                            )}
+                                            {materialViewMode === 'floor' && (
+                                                <div className="space-y-4">
+                                                     {materials.byFloor && Object.keys(materials.byFloor).map((floorId) => {
+                                                        const floorData = materials.byFloor[floorId];
+                                                        return (
+                                                            <div key={floorId} className="p-3 bg-slate-900/70 rounded-lg border border-slate-700/50">
+                                                                <h4 className="font-semibold text-green-400 mb-2 text-base">{floorData.floorName}</h4>
+                                                                <table className="w-full text-left text-sm">
+                                                                    <tbody className="divide-y divide-slate-700/50">
+                                                                        {floorData.materials.map((item, index) => (
+                                                                            <tr key={index}>
+                                                                                <td className="py-1 pr-2 w-8 font-medium">{item.quantity}</td>
+                                                                                <td className="py-1 pr-2 text-slate-300">{item.description}</td>
+                                                                                <td className="py-1 text-slate-300 text-right">{((l) => typeof l === 'string' ? l : l > 0 ? `${l / 12}'` : 'Sheet')(item.length)}</td>
+                                                                            </tr>
+                                                                        ))}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                            {materialViewMode === 'total' && (
                                                 <table className="w-full text-left text-sm">
                                                     <thead><tr className="border-b border-slate-700"><th className="py-2 font-semibold">Qty</th><th className="py-2 font-semibold">Description</th><th className="py-2 font-semibold text-right">Length</th></tr></thead>
                                                     <tbody className="divide-y divide-slate-700/50">{materials.list.map((item, index) => (<tr key={index}><td className="py-2 pr-2 font-medium">{item.quantity}</td><td className="py-2 pr-2 text-slate-300">{item.description}</td><td className="py-2 text-slate-300 text-right">{((l) => typeof l === 'string' ? l : l > 0 ? `${l / 12}'` : 'Sheet')(item.length)}</td></tr>))}</tbody>
@@ -1640,8 +1832,8 @@ const App: React.FC = () => {
                     </main>
                 </div>
             )}
-            {selectedWallIds.size > 0 && <BulkEditPanel selectedCount={selectedWallIds.size} floors={floors} onApply={handleApplyBulkEdit} onClear={() => setSelectedWallIds(new Set())} style={{ left: activePdfFile ? `calc(50% + ${pdfPanelWidth / 2}px)` : '50%' }} />}
-             {activePdfFile && (
+            {selectedWallIds.size > 0 && <BulkEditPanel selectedCount={selectedWallIds.size} floors={floors} onApply={handleApplyBulkEdit} onClear={() => setSelectedWallIds(new Set())} style={{ left: (activePdfFile && !isPdfDetached) ? `calc(50% + ${pdfPanelWidth / 2}px)` : '50%' }} clipboardDetails={propertyClipboard} onPasteProperties={handlePastePropertiesToSelected} />}
+             {activePdfFile && !isPdfDetached && (
                 <div 
                     className="fixed inset-y-0 left-0 bg-slate-800 shadow-2xl z-30 border-r border-slate-700 flex"
                     style={{ width: `${pdfPanelWidth}px` }}
@@ -1670,6 +1862,8 @@ const App: React.FC = () => {
                             onPageChange={setPdfPageNum}
                             savedScales={pdfScales}
                             onSetScale={handleSetScale}
+                            onDetach={handleTogglePdfDetach}
+                            isDetached={false}
                         />
                     </div>
                     <div 

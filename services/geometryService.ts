@@ -29,6 +29,90 @@ const formatInchesForName = (inches: number): string => {
     return `${inches.toFixed(2)}`;
 };
 
+export interface PositionedOpening {
+    opening: Opening;
+    index: number; // index within the original quantity expansion if needed, or just unique index
+    xStart: number;
+    xEnd: number;
+    center: number;
+    frameWidth: number;
+}
+
+// Shared layout logic to determine exactly where openings sit on the wall
+export const calculateOpeningLayouts = (wallLength: number, openings: Opening[]): PositionedOpening[] => {
+    const positioned: PositionedOpening[] = [];
+    
+    // Filter valid openings
+    const activeOpenings = openings.filter(op => op.quantity > 0 && op.width > 0);
+    if (activeOpenings.length === 0) return [];
+
+    // Separate manual positioning vs auto positioning
+    // Note: If quantity > 1, manual positioning (centerOffset) is ambiguous. 
+    // We will assume if centerOffset is present, quantity should ideally be 1.
+    // If quantity > 1 and centerOffset is present, we might just stack them or ignore offset for subsequent ones.
+    // For simplicity: If centerOffset is set, we treat it as a fixed position. 
+    // If NOT set, we flow it in the 'auto' stream.
+
+    // However, to keep spacing even for auto items, we need to know how much space is left.
+    // This is complex. Let's simplify:
+    // 1. Place all manually positioned openings first.
+    // 2. Calculate remaining space and place auto openings in the gaps? 
+    //    Or just auto-space everything that doesn't have an offset?
+    //    Let's go with: Auto-spacing applies to ALL openings that don't have an offset.
+    
+    const manualOpenings: PositionedOpening[] = [];
+    const autoOpenings: Opening[] = [];
+
+    activeOpenings.forEach(op => {
+        if (op.centerOffset !== undefined && op.centerOffset !== null && !isNaN(op.centerOffset) && op.quantity === 1) {
+            const frameWidth = op.width + 2 * (op.kingStudsPerSide * STUD_THICKNESS) + 2 * (op.jackStudsPerSide * STUD_THICKNESS);
+            const xStart = op.centerOffset - (frameWidth / 2);
+            manualOpenings.push({
+                opening: op,
+                index: 0,
+                xStart,
+                xEnd: xStart + frameWidth,
+                center: op.centerOffset,
+                frameWidth
+            });
+        } else {
+            // If quantity > 1, we treat them all as auto for now to avoid stacking
+            for(let i=0; i<op.quantity; i++) {
+                autoOpenings.push(op);
+            }
+        }
+    });
+
+    // Sort manual openings by position
+    manualOpenings.sort((a,b) => a.xStart - b.xStart);
+
+    // Calculate Auto Spacing
+    if (autoOpenings.length > 0) {
+        const totalAutoWidth = autoOpenings.reduce((sum, op) => sum + op.width + 2 * (op.kingStudsPerSide * STUD_THICKNESS) + 2 * (op.jackStudsPerSide * STUD_THICKNESS), 0);
+        
+        // We simply flow auto openings in the available wall length, ignoring manual ones for collision for now (simpler MVP)
+        // Or better: Distribute them evenly across the whole wall, overlapping if manual is there (user must fix).
+        const spacing = (wallLength - totalAutoWidth) / (autoOpenings.length + 1);
+        let currentX = spacing;
+        
+        autoOpenings.forEach((op, idx) => {
+            const frameWidth = op.width + 2 * (op.kingStudsPerSide * STUD_THICKNESS) + 2 * (op.jackStudsPerSide * STUD_THICKNESS);
+            positioned.push({
+                opening: op,
+                index: idx,
+                xStart: currentX,
+                xEnd: currentX + frameWidth,
+                center: currentX + (frameWidth / 2),
+                frameWidth
+            });
+            currentX += frameWidth + spacing;
+        });
+    }
+
+    // Combine
+    return [...positioned, ...manualOpenings];
+};
+
 
 export const generateWallMembers = (details: WallDetails): Member3D[] => {
     const { wallLength, wallHeight, studSpacing, openings, doubleTopPlate, studsOnCenter, studSize, startStuds, endStuds, blockingRows, sheathing } = details;
@@ -64,18 +148,8 @@ export const generateWallMembers = (details: WallDetails): Member3D[] => {
     
     const studHeight = wallHeight - topPlateHeight - bottomPlateHeight;
     
-    const allOpenings = openings.filter(op => op.width > 0 && op.height > 0 && op.quantity > 0);
-    const openingLayouts = allOpenings.flatMap(op => Array(op.quantity).fill(op));
-    const totalOpeningFrameWidth = openingLayouts.reduce((acc, op) => acc + op.width + 2 * (op.kingStudsPerSide * STUD_THICKNESS) + 2 * (op.jackStudsPerSide * STUD_THICKNESS), 0);
-    const spacing = (wallLength - totalOpeningFrameWidth) > 0 ? (wallLength - totalOpeningFrameWidth) / (openingLayouts.length + 1) : 0;
-    
-    const openingPositions: {start: number, end: number}[] = [];
-    let currentXForPositions = spacing;
-    openingLayouts.forEach(opening => {
-        const frameWidthForOne = opening.width + 2 * (opening.kingStudsPerSide * STUD_THICKNESS) + 2 * (opening.jackStudsPerSide * STUD_THICKNESS);
-        openingPositions.push({ start: currentXForPositions, end: currentXForPositions + frameWidthForOne});
-        currentXForPositions += frameWidthForOne + spacing;
-    });
+    // Calculate Layouts
+    const openingLayouts = calculateOpeningLayouts(wallLength, openings);
 
     // Common Studs Logic
     const studPositionsToDraw: { x: number }[] = [];
@@ -113,7 +187,7 @@ export const generateWallMembers = (details: WallDetails): Member3D[] => {
     // Create Studs
     sortedUniqueXs.forEach((x) => {
         const studCenter = x + STUD_THICKNESS / 2;
-        if (!openingPositions.some(pos => studCenter > pos.start && studCenter < pos.end)) {
+        if (!openingLayouts.some(pos => studCenter > pos.xStart && studCenter < pos.xEnd)) {
             const { id, name } = getMemberData(studSize, studHeight, 'stud');
             members.push({ id, name, x, y: topPlateHeight, z: 0, w: STUD_THICKNESS, h: studHeight, d: studDepth, type: 'stud' });
         }
@@ -129,16 +203,13 @@ export const generateWallMembers = (details: WallDetails): Member3D[] => {
             
             if (gap > 3) {
                  const blockCenter = currentEnd + (gap / 2);
-                 if (!openingPositions.some(pos => blockCenter > pos.start && blockCenter < pos.end)) {
+                 if (!openingLayouts.some(pos => blockCenter > pos.xStart && blockCenter < pos.xEnd)) {
                      for (let r = 1; r <= blockingRows; r++) {
-                         // Distribute evenly vertically
                          const baseHeight = (wallHeight / (blockingRows + 1)) * r;
-                         // Stagger logic: alternating bays go up/down 1.5 inches for nailing
                          const staggerOffset = (i % 2 === 0) ? -1.5 : 1.5;
                          const yPos = baseHeight + staggerOffset;
 
                          const { id, name } = getMemberData(studSize, gap, 'block');
-                         // Blocks are usually pieces of stud material turned to fill the depth
                          members.push({ 
                              id, 
                              name, 
@@ -146,7 +217,7 @@ export const generateWallMembers = (details: WallDetails): Member3D[] => {
                              y: yPos, 
                              z: 0, 
                              w: gap, 
-                             h: 1.5, // nominal height when flat
+                             h: 1.5, 
                              d: studDepth, 
                              type: 'blocking' 
                          });
@@ -156,17 +227,32 @@ export const generateWallMembers = (details: WallDetails): Member3D[] => {
         }
     }
 
-
     // Openings
-    let currentX = spacing;
-    openingLayouts.forEach((opening: Opening, index) => {
+    openingLayouts.forEach((layout, index) => {
+        const { opening, xStart } = layout;
         const openingId = `${opening.id}-${index}`;
-        const frameStart = currentX;
+        const frameStart = xStart;
         const headerH = headerHeights[opening.headerSize];
         
         const leftKingStudsWidth = opening.kingStudsPerSide * STUD_THICKNESS;
         const leftJackStudsWidth = opening.jackStudsPerSide * STUD_THICKNESS;
-        const jackHeight = studHeight - headerH;
+        
+        let headerYPos = topPlateHeight; 
+        let jackHeight = studHeight - headerH;
+        let crippleAboveHeight = 0;
+        
+        if (opening.type === 'door') {
+             // Y = TotalWallHeight - BottomPlate - OpeningHeight - HeaderHeight
+             // (Assuming Opening Height is from bottom plate up, so we subtract bottom plate)
+             headerYPos = wallHeight - bottomPlateHeight - opening.height - headerH;
+             
+             crippleAboveHeight = headerYPos - topPlateHeight;
+             if (crippleAboveHeight < 0) {
+                 headerYPos = topPlateHeight;
+                 crippleAboveHeight = 0;
+             }
+             jackHeight = opening.height; 
+        }
 
         // Kings and Jacks
         for (let k = 0; k < opening.kingStudsPerSide; k++) { // Left Kings
@@ -175,13 +261,15 @@ export const generateWallMembers = (details: WallDetails): Member3D[] => {
         }
         for (let j = 0; j < opening.jackStudsPerSide; j++) { // Left Jacks
              const { id, name } = getMemberData(studSize, jackHeight, 'jack');
-             members.push({ id, name, x: (frameStart + leftKingStudsWidth + j * STUD_THICKNESS), y: (topPlateHeight + headerH), z: 0, w: STUD_THICKNESS, h: jackHeight, d: studDepth, type: 'king-jack' });
+             const jackY = headerYPos + headerH;
+             members.push({ id, name, x: (frameStart + leftKingStudsWidth + j * STUD_THICKNESS), y: jackY, z: 0, w: STUD_THICKNESS, h: jackHeight, d: studDepth, type: 'king-jack' });
         }
         
         const rightFrameStart = frameStart + leftKingStudsWidth + leftJackStudsWidth + opening.width;
         for (let j = 0; j < opening.jackStudsPerSide; j++) { // Right Jacks
              const { id, name } = getMemberData(studSize, jackHeight, 'jack');
-             members.push({ id, name, x: (rightFrameStart + j * STUD_THICKNESS), y: (topPlateHeight + headerH), z: 0, w: STUD_THICKNESS, h: jackHeight, d: studDepth, type: 'king-jack' });
+             const jackY = headerYPos + headerH;
+             members.push({ id, name, x: (rightFrameStart + j * STUD_THICKNESS), y: jackY, z: 0, w: STUD_THICKNESS, h: jackHeight, d: studDepth, type: 'king-jack' });
         }
         for (let k = 0; k < opening.kingStudsPerSide; k++) { // Right Kings
              const { id, name } = getMemberData(studSize, studHeight, 'king');
@@ -196,11 +284,23 @@ export const generateWallMembers = (details: WallDetails): Member3D[] => {
         const headerTotalDepth = opening.headerPly * 1.5 + (opening.headerPly > 1 ? (opening.headerPly -1) * 0.5 : 0);
         for (let p = 0; p < opening.headerPly; p++) {
             const plyZOffset = -(headerTotalDepth/2) + (p * (1.5 + 0.5)) + (1.5/2);
-            members.push({ id: `header-${openingId}-${p}`, name: headerName, x: headerStartX, y: topPlateHeight, z: plyZOffset, w: headerWidthInches, h: headerH, d: 1.5, type: 'header' });
+            members.push({ id: `header-${openingId}-${p}`, name: headerName, x: headerStartX, y: headerYPos, z: plyZOffset, w: headerWidthInches, h: headerH, d: 1.5, type: 'header' });
+        }
+        
+        // Cripples Above
+        if (crippleAboveHeight > 1.5) {
+             let crippleXPos = Math.ceil(headerStartX / studSpacing) * studSpacing;
+             while (crippleXPos < headerStartX + headerWidthInches) {
+                 if (crippleXPos > headerStartX) {
+                    const { id, name } = getMemberData(studSize, crippleAboveHeight, 'cripple');
+                    members.push({ id, name, x: (crippleXPos - (STUD_THICKNESS / 2)), y: topPlateHeight, z: 0, w: STUD_THICKNESS, h: crippleAboveHeight, d: studDepth, type: 'cripple' });
+                 }
+                 crippleXPos += studSpacing;
+             }
         }
         
         if (opening.type === 'window') {
-            const sillY = topPlateHeight + headerH + opening.height;
+            const sillY = headerYPos + headerH + opening.height;
             const sillName = `${studSize}x${formatInchesForName(headerWidthInches)} Sill Plate`;
             members.push({ id: `sill-${openingId}`, name: sillName, x: headerStartX, y: sillY, z: 0, w: headerWidthInches, h: PLATE_THICKNESS, d: studDepth, type: 'sill' });
 
@@ -215,16 +315,13 @@ export const generateWallMembers = (details: WallDetails): Member3D[] => {
                  crippleXPos += studSpacing;
              }
         }
-
-        const frameWidthForOne = opening.width + 2 * leftKingStudsWidth + 2 * leftJackStudsWidth;
-        currentX += frameWidthForOne + spacing;
     });
 
     // Sheathing
     if (sheathing) {
         const PANEL_WIDTH = 48;
         const PANEL_HEIGHT = 96;
-        const THICKNESS = 0.5; // Nominal thickness
+        const THICKNESS = 0.5; 
 
         let currentPanelX = 0;
         let panelCount = 1;
@@ -241,8 +338,6 @@ export const generateWallMembers = (details: WallDetails): Member3D[] => {
                     height = wallHeight - currentPanelY;
                 }
                 
-                // CRITICAL FIX: Include dimensions in name to differentiate 4x8 panels from cut pieces
-                // so SketchUp creates unique component definitions for them.
                 const panelName = `Sheathing ${width.toFixed(1)}x${height.toFixed(1)}`;
                 
                 members.push({
@@ -250,7 +345,7 @@ export const generateWallMembers = (details: WallDetails): Member3D[] => {
                     name: panelName,
                     x: currentPanelX,
                     y: currentPanelY,
-                    z: studDepth, // Face of wall
+                    z: studDepth, 
                     w: width,
                     h: height,
                     d: THICKNESS,

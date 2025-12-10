@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import { CloseIcon, PlusIcon, ClipboardCopyIcon, ClipboardPasteIcon } from './Icons';
+import { CloseIcon, PlusIcon, ClipboardCopyIcon, ClipboardPasteIcon, ExternalLinkIcon } from './Icons';
 import type { Wall, Point } from '../types';
 
 // Set worker to a reliable CDN matching the installed API version to avoid mismatch errors
@@ -30,6 +30,8 @@ interface PdfViewerProps {
     onPageChange: (pageNum: number) => void;
     savedScales: Record<number, number>;
     onSetScale: (pageNum: number, scale: number) => void;
+    onDetach?: () => void;
+    isDetached?: boolean;
 }
 
 type Mode = 'IDLE' | 'SETTING_SCALE_START' | 'SETTING_SCALE_END' | 'DRAWING_WALL' | 'PLACING_START' | 'PLACING_END' | 'PASTING';
@@ -110,7 +112,7 @@ const PageSelectorModal: React.FC<{
     );
 };
 
-const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, projectWalls, wallToPlace, onWallPlaced, highlightedWallId, clickedWallId, setClickedWallId, wallToFocusId, onFocusDone, onCopyWallDetails, onPasteWallDetails, selectedPdfWallIds, setSelectedPdfWallIds, copiedLayout, onCopyLayout, onPasteLayout, currentPage, onPageChange, savedScales, onSetScale }) => {
+const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, projectWalls, wallToPlace, onWallPlaced, highlightedWallId, clickedWallId, setClickedWallId, wallToFocusId, onFocusDone, onCopyWallDetails, onPasteWallDetails, selectedPdfWallIds, setSelectedPdfWallIds, copiedLayout, onCopyLayout, onPasteLayout, currentPage, onPageChange, savedScales, onSetScale, onDetach, isDetached }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const overlayRef = useRef<HTMLCanvasElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -131,6 +133,9 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, project
     const [showWallNames, setShowWallNames] = useState(true);
     
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; wall: Wall } | null>(null);
+    
+    // Zoom Logic Refs
+    const zoomTarget = useRef<{ xRatio: number; yRatio: number; mouseX: number; mouseY: number } | null>(null);
     
     const scaleRatio = savedScales[currentPage] || null;
     
@@ -156,6 +161,57 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, project
             }
         }
     }, [wallToFocusId, projectWalls, currentPage, onPageChange]);
+
+    // Wheel Zoom Listener
+    useEffect(() => {
+        const container = scrollContainerRef.current;
+        if (!container) return;
+
+        const onWheel = (e: WheelEvent) => {
+            e.preventDefault();
+
+            const rect = container.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            const scrollX = container.scrollLeft;
+            const scrollY = container.scrollTop;
+            
+            // Calculate ratio of mouse position relative to total content size
+            const xRatio = (scrollX + x) / container.scrollWidth;
+            const yRatio = (scrollY + y) / container.scrollHeight;
+
+            zoomTarget.current = { xRatio, yRatio, mouseX: x, mouseY: y };
+
+            const delta = -e.deltaY;
+            setZoom(prev => {
+                const factor = 0.1;
+                let newZoom = prev + (delta > 0 ? prev * factor : -prev * factor);
+                newZoom = Math.max(0.1, Math.min(5.0, newZoom));
+                if (Math.abs(newZoom - 1.0) < 0.05) newZoom = 1.0;
+                return newZoom;
+            });
+        };
+
+        container.addEventListener('wheel', onWheel, { passive: false });
+        return () => container.removeEventListener('wheel', onWheel);
+    }, []);
+
+    // Correct Scroll Position after Zoom
+    useLayoutEffect(() => {
+        const container = scrollContainerRef.current;
+        if (container && zoomTarget.current) {
+            const { xRatio, yRatio, mouseX, mouseY } = zoomTarget.current;
+            
+            const newScrollWidth = container.scrollWidth;
+            const newScrollHeight = container.scrollHeight;
+
+            container.scrollLeft = (newScrollWidth * xRatio) - mouseX;
+            container.scrollTop = (newScrollHeight * yRatio) - mouseY;
+
+            zoomTarget.current = null;
+        }
+    }, [zoom]);
 
     const renderPage = useCallback(async () => {
         if (!pdfDoc || !canvasRef.current) return;
@@ -264,8 +320,6 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, project
                  const ux = lengthPixels > 0 ? dx / lengthPixels : 0;
                  const uy = lengthPixels > 0 ? dy / lengthPixels : 0;
                  
-                 // Use wall.details.wallLength for layout calculation logic
-                 // We map the "inch position" to "pixel position" based on percentage t
                  const wallLengthInches = wall.details.wallLength;
                  
                  if (wallLengthInches > 0) {
@@ -474,8 +528,10 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, project
                 handleCancelInteraction();
             }
         };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
+        // Attach listener to the owner window (handles both main and popout cases)
+        const win = scrollContainerRef.current?.ownerDocument?.defaultView || window;
+        win.addEventListener('keydown', handleKeyDown);
+        return () => win.removeEventListener('keydown', handleKeyDown);
     }, [handleCancelInteraction]);
     
      const getWallAtPoint = useCallback((clickPoint: Point): Wall | null => {
@@ -642,9 +698,10 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, project
 
     useEffect(() => {
         const closeMenu = () => setContextMenu(null);
-        window.addEventListener('click', closeMenu);
-        window.addEventListener('contextmenu', (e) => { if (!overlayRef.current?.contains(e.target as Node)) { closeMenu(); } }, true);
-        return () => { window.removeEventListener('click', closeMenu); }
+        const win = scrollContainerRef.current?.ownerDocument?.defaultView || window;
+        win.addEventListener('click', closeMenu);
+        win.addEventListener('contextmenu', (e) => { if (!overlayRef.current?.contains(e.target as Node)) { closeMenu(); } }, true);
+        return () => { win.removeEventListener('click', closeMenu); }
     }, []);
     
      const handleSetScaleClick = () => {
@@ -763,7 +820,14 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, project
                         <button onClick={() => setIsPageSelectorOpen(true)} disabled={!pdfDoc || pdfDoc.numPages <= 1} className="px-3 py-1 bg-slate-700 rounded disabled:opacity-50 text-sm">Select Page</button>
                     </div>
                 </div>
-                <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-700"><CloseIcon className="w-5 h-5" /></button>
+                <div className="flex items-center gap-1">
+                    {onDetach && (
+                         <button onClick={onDetach} className="p-2 rounded-full hover:bg-slate-700 text-slate-400 hover:text-white" title={isDetached ? "Attach to Main Window" : "Pop Out to New Window"}>
+                            <ExternalLinkIcon className="w-5 h-5" />
+                        </button>
+                    )}
+                    <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-700"><CloseIcon className="w-5 h-5" /></button>
+                </div>
             </header>
             <div className="flex-grow overflow-auto relative" ref={scrollContainerRef}>
                 <div style={{ width: canvasRef.current?.width || '100%', height: canvasRef.current?.height || '100%', minHeight: '400px', position: 'relative', margin: 'auto' }}>

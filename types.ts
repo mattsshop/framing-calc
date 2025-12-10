@@ -12,6 +12,7 @@ export interface Opening {
     headerPly: 2 | 3;
     kingStudsPerSide: number;
     jackStudsPerSide: number;
+    centerOffset?: number; // Distance from start of wall to center of opening
 }
 
 export interface WallDetails {
@@ -64,6 +65,7 @@ export interface MaterialItem {
 export interface FramingMaterials {
     list: MaterialItem[]; // Consolidated list for the whole project
     byWall: Record<string, { wallName: string; materials: MaterialItem[] }>; // Materials broken down by wall ID
+    byFloor: Record<string, { floorName: string; materials: MaterialItem[] }>; // Materials broken down by Floor ID
     proTip: string;
     totalWalls: number;
     totalLinearFeet: number;

@@ -19,11 +19,22 @@ const OpeningRow: React.FC<{
 }> = ({ opening, onUpdate, onDelete }) => {
     
     const handleChange = (field: keyof Opening, value: any) => {
-        onUpdate(opening.id, { ...opening, [field]: value });
+        // If updating centerOffset, ensure quantity is 1 for simplicity in MVP
+        // If quantity changed > 1, clear centerOffset
+        let updates: Partial<Opening> = { [field]: value };
+        
+        if (field === 'quantity' && (value as number) > 1) {
+            updates.centerOffset = undefined;
+        }
+        if (field === 'centerOffset' && value !== undefined && opening.quantity > 1) {
+             updates.quantity = 1;
+        }
+
+        onUpdate(opening.id, { ...opening, ...updates });
     };
 
     return (
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 items-center p-2 bg-slate-800 rounded-md">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-3 items-center p-2 bg-slate-800 rounded-md">
             <select value={opening.type} onChange={e => handleChange('type', e.target.value)} className="bg-slate-900 border border-slate-700 rounded-md p-2">
                 <option value="window">Window</option>
                 <option value="door">Door</option>
@@ -31,6 +42,17 @@ const OpeningRow: React.FC<{
             <input type="number" value={opening.quantity} onChange={e => handleChange('quantity', parseInt(e.target.value, 10) || 1)} className="bg-slate-900 border border-slate-700 rounded-md p-2" placeholder="Qty" />
             <input type="number" value={opening.width} onChange={e => handleChange('width', parseInt(e.target.value, 10) || 0)} className="bg-slate-900 border border-slate-700 rounded-md p-2" placeholder="Width (in)" />
             <input type="number" value={opening.height} onChange={e => handleChange('height', parseInt(e.target.value, 10) || 0)} className="bg-slate-900 border border-slate-700 rounded-md p-2" placeholder="Height (in)" />
+            
+             <input 
+                type="number" 
+                value={opening.centerOffset || ''} 
+                onChange={e => handleChange('centerOffset', e.target.value ? parseFloat(e.target.value) : undefined)} 
+                className="bg-slate-900 border border-slate-700 rounded-md p-2 disabled:opacity-50" 
+                placeholder={opening.quantity > 1 ? "Auto" : "Center (in)"}
+                disabled={opening.quantity > 1}
+                title={opening.quantity > 1 ? "Manual positioning disabled for multiple copies" : "Distance from start of wall to center"}
+            />
+
             <select value={opening.headerSize} onChange={e => handleChange('headerSize', e.target.value)} className="bg-slate-900 border border-slate-700 rounded-md p-2">
                 <option value="2x6">2x6</option>
                 <option value="2x8">2x8</option>
@@ -55,7 +77,14 @@ const WallEditor: React.FC<WallEditorProps> = ({ wall, onSave, onCancel }) => {
     const [customHeight, setCustomHeight] = useState('');
 
     useEffect(() => {
-        setLocalWall(wall);
+        // Round length to 2 decimal places for cleaner display
+        const roundedDetails = {
+            ...wall.details,
+            wallLength: Math.round(wall.details.wallLength * 100) / 100
+        };
+        
+        setLocalWall({ ...wall, details: roundedDetails });
+
         const h = wall.details.wallHeight;
         if (h !== 97.125 && h !== 109.125) {
              setCustomHeight(h.toString());
@@ -116,7 +145,14 @@ const WallEditor: React.FC<WallEditorProps> = ({ wall, onSave, onCancel }) => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                         <label className="block text-sm font-medium text-slate-400 mb-2">Wall Length (inches)</label>
-                        <input type="number" value={localWall.details.wallLength} onChange={e => handleDetailChange('wallLength', parseFloat(e.target.value) || 0)} className="w-full bg-slate-900 border border-slate-700 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" />
+                        <input 
+                            type="number" 
+                            step="0.01"
+                            value={localWall.details.wallLength} 
+                            onChange={e => handleDetailChange('wallLength', parseFloat(e.target.value) || 0)} 
+                            onBlur={() => handleDetailChange('wallLength', Math.round(localWall.details.wallLength * 100) / 100)}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" 
+                        />
                          <p className="text-xs text-slate-500 mt-1">{(localWall.details.wallLength / 12).toFixed(2)} feet</p>
                     </div>
                      <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
@@ -252,11 +288,12 @@ const WallEditor: React.FC<WallEditorProps> = ({ wall, onSave, onCancel }) => {
                             </div>
                         ) : (
                             <>
-                                <div className="hidden lg:grid grid-cols-8 gap-3 px-2 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                                <div className="hidden lg:grid grid-cols-9 gap-3 px-2 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">
                                     <div>Type</div>
                                     <div>Qty</div>
                                     <div>Width</div>
                                     <div>Height</div>
+                                    <div>Center</div>
                                     <div>Header Size</div>
                                     <div>Ply</div>
                                     <div className="grid grid-cols-2 gap-2">

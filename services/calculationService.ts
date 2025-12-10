@@ -1,5 +1,6 @@
 
-import type { Wall, MaterialItem, FramingMaterials, WallDetails, Opening } from '../types';
+import type { Wall, MaterialItem, FramingMaterials, WallDetails, Opening, Floor } from '../types';
+import { calculateOpeningLayouts } from './geometryService';
 
 const PLATE_THICKNESS = 1.5;
 const STUD_THICKNESS = 1.5;
@@ -92,17 +93,8 @@ const calculateWallCuts = (details: WallDetails): RawCuts => {
     const bottomPlateHeight = PLATE_THICKNESS;
     const commonStudLength = wallHeight - topPlateHeight - bottomPlateHeight;
 
-    let openingLayouts: { start: number, end: number }[] = [];
-    let currentX = 0;
-    details.openings.forEach(op => {
-        for (let i = 0; i < op.quantity; i++) {
-            const frameWidth = op.width + (op.jackStudsPerSide * STUD_THICKNESS * 2) + (op.kingStudsPerSide * STUD_THICKNESS * 2);
-            if (currentX + frameWidth <= wallLength) {
-                openingLayouts.push({ start: currentX, end: currentX + frameWidth });
-                currentX += frameWidth + studSpacing;
-            }
-        }
-    });
+    // Use shared layout logic
+    const openingLayouts = calculateOpeningLayouts(wallLength, openings);
 
     const studLayoutPositions = new Set<number>();
     const startStudCount = startStuds || 1;
@@ -128,7 +120,7 @@ const calculateWallCuts = (details: WallDetails): RawCuts => {
     studLayoutPositions.forEach(xPosHundredths => {
         const xPos = xPosHundredths / 100;
         const studCenter = xPos + STUD_THICKNESS / 2;
-        if (!openingLayouts.some(op => studCenter > op.start && studCenter < op.end)) {
+        if (!openingLayouts.some(pos => studCenter > pos.xStart && studCenter < pos.xEnd)) {
             allStudLengths.push(commonStudLength);
         }
     });
@@ -143,7 +135,7 @@ const calculateWallCuts = (details: WallDetails): RawCuts => {
             const gap = nextPos - currentEnd;
             if (gap > 3) {
                  const blockCenter = currentEnd + (gap / 2);
-                 if (!openingLayouts.some(op => blockCenter > op.start && blockCenter < op.end)) {
+                 if (!openingLayouts.some(pos => blockCenter > pos.xStart && blockCenter < pos.xEnd)) {
                      for(let r=0; r < blockingRows; r++) {
                          raw.blockingCuts.push({ length: gap, size: studSize });
                      }
@@ -153,34 +145,48 @@ const calculateWallCuts = (details: WallDetails): RawCuts => {
     }
 
     // Openings
-    openings.forEach(op => {
+    openingLayouts.forEach(layout => {
+        const op = layout.opening;
         const headerLength = op.width + (op.jackStudsPerSide * STUD_THICKNESS * 2);
-        for (let i = 0; i < op.quantity; i++) {
-            // King and Jack studs
-            const fullLengthStudsNeeded = (op.kingStudsPerSide * 2) + (op.jackStudsPerSide * 2);
-            for(let j = 0; j < fullLengthStudsNeeded; j++) {
-                allStudLengths.push(commonStudLength);
+
+        // King and Jack studs
+        const fullLengthStudsNeeded = (op.kingStudsPerSide * 2) + (op.jackStudsPerSide * 2);
+        for(let j = 0; j < fullLengthStudsNeeded; j++) {
+            allStudLengths.push(commonStudLength);
+        }
+        
+        const headerHeight = headerHeights[op.headerSize];
+
+        if (op.type === 'window') {
+            addOtherCut(`${studSize} Plate`, headerLength); // Sill plate
+            const crippleBelowLength = wallHeight - topPlateHeight - bottomPlateHeight - headerHeight - op.height - PLATE_THICKNESS;
+            if(crippleBelowLength > 0){
+                const numCripplePositions = Math.floor(headerLength / studSpacing);
+                for (let k = 0; k < numCripplePositions; k++) {
+                    allStudLengths.push(crippleBelowLength);
+                }
             }
-            
-            if (op.type === 'window') {
-                addOtherCut(`${studSize} Plate`, headerLength); // Sill plate
-                const headerHeight = headerHeights[op.headerSize];
-                const crippleBelowLength = wallHeight - topPlateHeight - bottomPlateHeight - headerHeight - op.height - PLATE_THICKNESS;
-                if(crippleBelowLength > 0){
+        } else if (op.type === 'door') {
+            // Door cripples logic
+            const topOfHeaderY = op.height + headerHeight;
+            const bottomOfTopPlateY = wallHeight - topPlateHeight;
+            const crippleAboveLength = bottomOfTopPlateY - topOfHeaderY;
+
+            if (crippleAboveLength > 0) {
                     const numCripplePositions = Math.floor(headerLength / studSpacing);
                     for (let k = 0; k < numCripplePositions; k++) {
-                        allStudLengths.push(crippleBelowLength);
+                    if (crippleAboveLength > 1) {
+                        allStudLengths.push(crippleAboveLength);
                     }
                 }
             }
+        }
 
-            const headerMaterialDesc = `${op.headerSize} Header`;
-            for (let j = 0; j < op.headerPly; j++) addOtherCut(headerMaterialDesc, headerLength);
-            
-            if (op.headerPly > 1) {
-                const headerHeight = headerHeights[op.headerSize];
-                addOtherCut('1/2" Plywood Spacer', (op.headerPly - 1) * headerHeight * headerLength / 144);
-            }
+        const headerMaterialDesc = `${op.headerSize} Header`;
+        for (let j = 0; j < op.headerPly; j++) addOtherCut(headerMaterialDesc, headerLength);
+        
+        if (op.headerPly > 1) {
+            addOtherCut('1/2" Plywood Spacer', (op.headerPly - 1) * headerHeight * headerLength / 144);
         }
     });
 
@@ -298,18 +304,8 @@ const calculateSingleWallMaterials = (details: WallDetails): MaterialItem[] => {
     return sortMaterialList(materialList);
 };
 
-export const calculateProjectMaterials = (walls: Wall[]): Omit<FramingMaterials, 'proTip' | 'totalWalls' | 'totalLinearFeet'> => {
-    const byWall: FramingMaterials['byWall'] = {};
-    
-    // 1. Calculate Per-Wall Lists (Local Optimization)
-    walls.forEach(wall => {
-        byWall[wall.id] = {
-            wallName: wall.name,
-            materials: calculateSingleWallMaterials(wall.details),
-        };
-    });
-
-    // 2. Calculate Consolidated List (Global Optimization)
+// Reusable function to aggregate raw cuts from a list of walls
+const aggregateRawCuts = (walls: Wall[]) => {
     const globalRawCuts: RawCuts = {
         studCuts: [],
         blockingCuts: [],
@@ -345,6 +341,41 @@ export const calculateProjectMaterials = (walls: Wall[]): Omit<FramingMaterials,
          consolidatedList.push({ quantity: count, description: `${size} Pre-cut Studs`, length: PRECUT_STUD_LENGTHS['104.625'] });
     }
 
+    return { globalRawCuts, consolidatedList };
+};
+
+export const calculateProjectMaterials = (walls: Wall[], floors: Floor[]): Omit<FramingMaterials, 'proTip' | 'totalWalls' | 'totalLinearFeet'> => {
+    const byWall: FramingMaterials['byWall'] = {};
+    const byFloor: FramingMaterials['byFloor'] = {};
+    
+    // 1. Calculate Per-Wall Lists (Local Optimization)
+    walls.forEach(wall => {
+        byWall[wall.id] = {
+            wallName: wall.name,
+            materials: calculateSingleWallMaterials(wall.details),
+        };
+    });
+
+    // 2. Calculate Per-Floor Lists (Floor Aggregation)
+    floors.forEach(floor => {
+        const floorWalls = walls.filter(w => w.floorId === floor.id || (!w.floorId && floor.id === floors[0].id));
+        if (floorWalls.length > 0) {
+            const { globalRawCuts, consolidatedList } = aggregateRawCuts(floorWalls);
+            const optimizedBulk = processRawCuts({
+                ...globalRawCuts,
+                precut92: { count: 0, size: '2x4' },
+                precut104: { count: 0, size: '2x4' }
+            });
+            byFloor[floor.id] = {
+                floorName: floor.name,
+                materials: sortMaterialList([...consolidatedList, ...optimizedBulk]),
+            };
+        }
+    });
+
+    // 3. Calculate Consolidated List (Global Optimization)
+    const { globalRawCuts, consolidatedList } = aggregateRawCuts(walls);
+
     const optimizedBulk = processRawCuts({
         ...globalRawCuts,
         precut92: { count: 0, size: '2x4' },
@@ -356,5 +387,6 @@ export const calculateProjectMaterials = (walls: Wall[]): Omit<FramingMaterials,
     return {
         list: finalList,
         byWall: byWall,
+        byFloor: byFloor,
     };
 };

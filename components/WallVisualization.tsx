@@ -1,6 +1,7 @@
 
 import React from 'react';
 import type { WallDetails } from '../types';
+import { calculateOpeningLayouts } from '../services/geometryService';
 
 const PLATE_THICKNESS = 1.5;
 const STUD_THICKNESS = 1.5;
@@ -62,23 +63,7 @@ const WallVisualization: React.FC<WallVisualizationProps> = ({ details }) => {
     const studY = topPlateHeight * scale;
     const studW = STUD_THICKNESS * scale;
     
-    const allOpenings = openings.filter(op => op.width > 0 && op.height > 0 && op.quantity > 0);
-    const openingLayouts = allOpenings.flatMap(op => Array(op.quantity).fill(op));
-    
-    const totalOpeningFrameWidth = openingLayouts.reduce((acc, op) => {
-        const frameWidthForOne = op.width + 2 * (op.kingStudsPerSide * STUD_THICKNESS) + 2 * (op.jackStudsPerSide * STUD_THICKNESS);
-        return acc + frameWidthForOne;
-    }, 0);
-
-    const spacing = (wallLength - totalOpeningFrameWidth) > 0 ? (wallLength - totalOpeningFrameWidth) / (openingLayouts.length + 1) : 0;
-
-    const openingPositions: {start: number, end: number}[] = [];
-    let currentX = spacing;
-    openingLayouts.forEach(opening => {
-        const frameWidthForOne = opening.width + 2 * (opening.kingStudsPerSide * STUD_THICKNESS) + 2 * (opening.jackStudsPerSide * STUD_THICKNESS);
-        openingPositions.push({ start: currentX, end: currentX + frameWidthForOne});
-        currentX += frameWidthForOne + spacing;
-    });
+    const openingLayouts = calculateOpeningLayouts(wallLength, openings);
 
     // Common Studs Logic
     const studHeight = wallHeight - topPlateHeight - bottomPlateHeight;
@@ -110,7 +95,7 @@ const WallVisualization: React.FC<WallVisualizationProps> = ({ details }) => {
 
     uniquePositions.forEach((xPos) => {
         const studCenter = xPos + STUD_THICKNESS / 2;
-        if (!openingPositions.some(pos => studCenter >= pos.start && studCenter <= pos.end)) {
+        if (!openingLayouts.some(pos => studCenter >= pos.xStart && studCenter <= pos.xEnd)) {
             elements.push(<FramingMember key={`stud-${xPos}`} left={xPos * scale} top={studY} width={studW} height={studH} color="bg-yellow-700" />);
         }
     });
@@ -125,13 +110,12 @@ const WallVisualization: React.FC<WallVisualizationProps> = ({ details }) => {
 
             if (gap > 3) {
                 const blockCenter = currentEnd + (gap / 2);
-                if (!openingPositions.some(pos => blockCenter > pos.start && blockCenter < pos.end)) {
+                if (!openingLayouts.some(pos => blockCenter > pos.xStart && blockCenter < pos.xEnd)) {
                     for (let r = 1; r <= blockingRows; r++) {
                         const baseHeight = (wallHeight / (blockingRows + 1)) * r;
                         const staggerOffset = (i % 2 === 0) ? -1.5 : 1.5;
                         const yPos = baseHeight + staggerOffset;
                         
-                        // Draw block as a small rectangle
                         elements.push(
                             <FramingMember 
                                 key={`block-${currentX}-${r}`} 
@@ -149,41 +133,71 @@ const WallVisualization: React.FC<WallVisualizationProps> = ({ details }) => {
     }
     
     // Openings
-    currentX = spacing;
-    openingLayouts.forEach((opening, index) => {
-        const openingId = `${(opening as any).id}-${index}`;
-        const frameStart = currentX;
+    openingLayouts.forEach((layout, index) => {
+        const { opening, xStart, center } = layout;
+        const openingId = `${opening.id}-${index}`;
+        const frameStart = xStart;
 
-        // Calculate dimensions in inches first for clarity
         const kingStudsWidth = opening.kingStudsPerSide * STUD_THICKNESS;
         const jackStudsWidth = opening.jackStudsPerSide * STUD_THICKNESS;
         const headerLengthInches = opening.width + 2 * jackStudsWidth;
         const headerStartInches = frameStart + kingStudsWidth;
         const headerHeightInches = headerHeights[opening.headerSize];
 
-        // Kings and Jacks
+        // Determine Vertical Positioning
+        let headerYInches = topPlateHeight;
+        let jackHeightInches = studHeight - headerHeightInches;
+        let cripplesAboveHeight = 0;
+
+        if (opening.type === 'door') {
+            headerYInches = wallHeight - bottomPlateHeight - opening.height - headerHeightInches;
+            
+            if (headerYInches < topPlateHeight) headerYInches = topPlateHeight;
+
+            cripplesAboveHeight = headerYInches - topPlateHeight;
+            jackHeightInches = opening.height; 
+        }
+
+        const headerY = headerYInches * scale;
+        const headerW = headerLengthInches * scale;
+        const headerH = headerHeightInches * scale;
+
+        const jackH = jackHeightInches * scale;
+        const jackTopY = headerY + headerH;
+
+        // Kings
         for (let k = 0; k < opening.kingStudsPerSide; k++) {
             elements.push(<FramingMember key={`king-left-${openingId}-${k}`} left={(frameStart + k * STUD_THICKNESS) * scale} top={studY} width={studW} height={studH} color="bg-yellow-800" />);
         }
+        
+        // Jacks
         for (let j = 0; j < opening.jackStudsPerSide; j++) {
-            elements.push(<FramingMember key={`jack-left-${openingId}-${j}`} left={(frameStart + kingStudsWidth + j * STUD_THICKNESS) * scale} top={studY + (headerHeightInches * scale)} width={studW} height={studH - (headerHeightInches * scale)} color="bg-yellow-800/80" />);
+            elements.push(<FramingMember key={`jack-left-${openingId}-${j}`} left={(frameStart + kingStudsWidth + j * STUD_THICKNESS) * scale} top={jackTopY} width={studW} height={jackH} color="bg-yellow-800/80" />);
         }
         
         const rightFrameStart = frameStart + kingStudsWidth + jackStudsWidth + opening.width;
         for (let j = 0; j < opening.jackStudsPerSide; j++) {
-            elements.push(<FramingMember key={`jack-right-${openingId}-${j}`} left={(rightFrameStart + j * STUD_THICKNESS) * scale} top={studY + (headerHeightInches * scale)} width={studW} height={studH - (headerHeightInches * scale)} color="bg-yellow-800/80" />);
+            elements.push(<FramingMember key={`jack-right-${openingId}-${j}`} left={(rightFrameStart + j * STUD_THICKNESS) * scale} top={jackTopY} width={studW} height={jackH} color="bg-yellow-800/80" />);
         }
         for (let k = 0; k < opening.kingStudsPerSide; k++) {
             elements.push(<FramingMember key={`king-right-${openingId}-${k}`} left={(rightFrameStart + jackStudsWidth + k * STUD_THICKNESS) * scale} top={studY} width={studW} height={studH} color="bg-yellow-800" />);
         }
         
         // Header
-        const headerX = headerStartInches * scale;
-        const headerW = headerLengthInches * scale;
-        const headerH = headerHeightInches * scale;
-        const headerY = topPlateHeight * scale;
-        elements.push(<FramingMember key={`header-${openingId}`} left={headerX} top={headerY} width={headerW} height={headerH} color="bg-red-700" />);
+        elements.push(<FramingMember key={`header-${openingId}`} left={headerStartInches * scale} top={headerY} width={headerW} height={headerH} color="bg-red-700" />);
         
+        // Cripples Above (Doors)
+        if (cripplesAboveHeight > 1.5) {
+            const cripH = cripplesAboveHeight * scale;
+            let crippleXPos = Math.ceil(headerStartInches / studSpacing) * studSpacing;
+            while (crippleXPos < headerStartInches + headerLengthInches) {
+                 if (crippleXPos > headerStartInches) {
+                    elements.push(<FramingMember key={`cripple-above-${openingId}-${crippleXPos}`} left={(crippleXPos - (STUD_THICKNESS/2)) * scale} top={topPlateHeight * scale} width={studW} height={cripH} color="bg-yellow-700" />);
+                 }
+                 crippleXPos += studSpacing;
+            }
+        }
+
         // Rough Opening visualization
         const roX = (frameStart + kingStudsWidth + jackStudsWidth) * scale;
         const roY = headerY + headerH;
@@ -194,9 +208,9 @@ const WallVisualization: React.FC<WallVisualizationProps> = ({ details }) => {
 
         if(isWindow){
             // Sill Plate
-            const sillY = roY + roH;
+            const sillY = (topPlateHeight * scale) + headerH + (opening.height * scale);
             const sillH = PLATE_THICKNESS * scale;
-            elements.push(<FramingMember key={`sill-${openingId}`} left={headerX} top={sillY} width={headerW} height={sillH} color="bg-yellow-600" />);
+            elements.push(<FramingMember key={`sill-${openingId}`} left={headerStartInches * scale} top={sillY} width={headerW} height={sillH} color="bg-yellow-600" />);
 
             // Cripples below sill
             const cripplesBelowY = sillY + sillH;
@@ -209,7 +223,16 @@ const WallVisualization: React.FC<WallVisualizationProps> = ({ details }) => {
                 crippleXPos += studSpacing;
             }
         }
-        currentX += opening.width + 2 * (kingStudsWidth + jackStudsWidth) + spacing;
+        
+        // Center Line Marker
+        elements.push(
+            <div key={`center-${openingId}`} className="absolute border-l border-indigo-400 border-dashed" style={{ left: `${center * scale}px`, top: 0, height: `${canvasHeight}px`, opacity: 0.5 }}></div>
+        );
+        elements.push(
+            <div key={`center-label-${openingId}`} className="absolute text-xs bg-indigo-900 text-indigo-200 px-1 rounded transform -translate-x-1/2" style={{ left: `${center * scale}px`, top: `${canvasHeight + 4}px` }}>
+                {formatLength(center)}
+            </div>
+        );
     });
 
     const dimensionLabel = formatLength(wallLength);

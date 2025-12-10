@@ -1,11 +1,7 @@
 
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 import type { Wall, FramingMaterials, WallDetails } from '../types';
-
-type jsPDFWithAutoTable = jsPDF & {
-  autoTable: (options: any) => jsPDF;
-};
 
 const formatLengthForPdf = (length: number | string) => {
     if (typeof length === 'string') return length;
@@ -13,13 +9,55 @@ const formatLengthForPdf = (length: number | string) => {
     return 'Sheet';
 };
 
-const addMaterialTablesToPdf = (doc: jsPDFWithAutoTable, materials: FramingMaterials, startY: number, format: 'both' | 'breakdown' | 'consolidated'): number => {
+const addMaterialTablesToPdf = (doc: jsPDF, materials: FramingMaterials, startY: number, format: 'both' | 'breakdown' | 'consolidated' | 'by-floor'): number => {
     let currentY = startY;
     
     const hasBreakdown = format === 'both' || format === 'breakdown';
     const hasConsolidated = format === 'both' || format === 'consolidated';
+    const hasFloor = format === 'both' || format === 'by-floor';
 
+    // 1. By Floor
+    if (hasFloor && materials.byFloor) {
+        doc.setFontSize(14);
+        doc.text('Material List by Floor', 14, currentY);
+        currentY += 10;
+
+        for (const floorId in materials.byFloor) {
+            const { floorName, materials: floorMaterials } = materials.byFloor[floorId];
+            if (floorMaterials.length === 0) continue;
+
+            const tableData = floorMaterials.map(item => [item.quantity.toString(), item.description, formatLengthForPdf(item.length)]);
+             const tableHeight = (tableData.length + 1) * 12 + 15;
+
+            if (currentY + tableHeight > doc.internal.pageSize.getHeight() - 40) {
+                doc.addPage();
+                currentY = 40;
+            }
+
+            doc.setFontSize(11);
+            doc.setFont('helvetica', 'bold');
+            doc.text(floorName, 14, currentY);
+            currentY += 5;
+
+            autoTable(doc, {
+                startY: currentY,
+                head: [['Qty', 'Description', 'Length']],
+                body: tableData,
+                theme: 'striped',
+                headStyles: { fillColor: [46, 204, 113] }, // Emerald green for floors
+                columnStyles: { 0: { cellWidth: 20 }, 2: { halign: 'right' } }
+            });
+            currentY = (doc as any).lastAutoTable.finalY + 15;
+        }
+    }
+
+    // 2. Breakdown by Wall
     if (hasBreakdown) {
+        if (hasFloor && (currentY + 60 > doc.internal.pageSize.getHeight() - 40)) {
+             doc.addPage();
+             currentY = 40;
+        }
+
         doc.setFontSize(14);
         doc.text('Material Breakdown by Wall', 14, currentY);
         currentY += 10;
@@ -29,7 +67,7 @@ const addMaterialTablesToPdf = (doc: jsPDFWithAutoTable, materials: FramingMater
             if (wallMaterials.length === 0) continue;
 
             const tableData = wallMaterials.map(item => [item.quantity.toString(), item.description, formatLengthForPdf(item.length)]);
-            const tableHeight = (tableData.length + 1) * 12 + 15; // Estimate height
+            const tableHeight = (tableData.length + 1) * 12 + 15;
 
             if (currentY + tableHeight > doc.internal.pageSize.getHeight() - 40) {
                 doc.addPage();
@@ -41,7 +79,7 @@ const addMaterialTablesToPdf = (doc: jsPDFWithAutoTable, materials: FramingMater
             doc.text(wallName, 14, currentY);
             currentY += 5;
 
-            doc.autoTable({
+            autoTable(doc, {
                 startY: currentY,
                 head: [['Qty', 'Description', 'Length']],
                 body: tableData,
@@ -53,8 +91,9 @@ const addMaterialTablesToPdf = (doc: jsPDFWithAutoTable, materials: FramingMater
         }
     }
 
+    // 3. Consolidated Total
     if (hasConsolidated) {
-        if (hasBreakdown && (currentY + 80 > doc.internal.pageSize.getHeight() - 40)) {
+        if ((hasBreakdown || hasFloor) && (currentY + 80 > doc.internal.pageSize.getHeight() - 40)) {
             doc.addPage();
             currentY = 40;
         }
@@ -62,7 +101,7 @@ const addMaterialTablesToPdf = (doc: jsPDFWithAutoTable, materials: FramingMater
         doc.text('Consolidated Project Total', 14, currentY);
         currentY += 10;
         const consolidatedTableData = materials.list.map(item => [item.quantity.toString(), item.description, formatLengthForPdf(item.length)]);
-        doc.autoTable({
+        autoTable(doc, {
             startY: currentY,
             head: [['Qty', 'Description', 'Length']],
             body: consolidatedTableData,
@@ -77,15 +116,15 @@ const addMaterialTablesToPdf = (doc: jsPDFWithAutoTable, materials: FramingMater
 };
 
 
-export const generateMaterialListPdf = (walls: Wall[], materials: FramingMaterials, format: 'both' | 'breakdown' | 'consolidated') => {
-  const doc = new jsPDF() as jsPDFWithAutoTable;
+export const generateMaterialListPdf = (walls: Wall[], materials: FramingMaterials, format: 'both' | 'breakdown' | 'consolidated' | 'by-floor') => {
+  const doc = new jsPDF();
   const today = new Date().toLocaleDateString();
 
   doc.setFontSize(20); doc.text('Framing Project Order List', 14, 22);
   doc.setFontSize(11); doc.text(`Generated by Framing Calculator Pro on ${today}`, 14, 28);
   
   doc.setFontSize(14); doc.text('Project Summary', 14, 40);
-  doc.autoTable({
+  autoTable(doc, {
     startY: 44,
     head: [['Parameter', 'Value']],
     body: [['Total Walls', walls.length.toString()], ['Total Linear Feet', `~${Math.round(materials.totalLinearFeet)} ft`]],
@@ -177,7 +216,7 @@ export const drawWallOnCanvas = (canvas: HTMLCanvasElement, details: WallDetails
 };
 
 export const generateMaterialReportPdf = (walls: Wall[], materials: FramingMaterials, wallImages: string[]) => {
-    const doc = new jsPDF('p', 'pt', 'a4') as jsPDFWithAutoTable;
+    const doc = new jsPDF('p', 'pt', 'a4');
     
     doc.deletePage(1); doc.addPage();
     const today = new Date().toLocaleDateString();
@@ -186,7 +225,7 @@ export const generateMaterialReportPdf = (walls: Wall[], materials: FramingMater
     doc.setFontSize(11); doc.text(`Generated by Framing Calculator Pro on ${today}`, 40, 60);
     
     doc.setFontSize(14); doc.text('Project Summary', 40, 85);
-    doc.autoTable({
+    autoTable(doc, {
         startY: 95, head: [['Parameter', 'Value']], body: [['Total Walls', walls.length.toString()], ['Total Linear Feet', `~${Math.round(materials.totalLinearFeet)} ft`]],
         theme: 'striped', headStyles: { fillColor: [41, 128, 185] }, margin: { left: 40, right: 40 },
     });

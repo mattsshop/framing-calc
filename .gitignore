@@ -22,15 +22,3 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
-# Node.js dependencies
-node_modules/
-.env
-
-# Firebase specific files (if any local config)
-firebase-debug.log
-.firebase/
-
-# Build outputs
-build/
-dist/
