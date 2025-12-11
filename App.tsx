@@ -453,6 +453,197 @@ const findDescendantIds = (parentId: string, allWalls: Wall[]): string[] => {
     return descendants;
 };
 
+interface WallRowProps {
+    node: { wall: Wall; level: number };
+    selectedIds: Set<string>;
+    isClicked: boolean;
+    floors: Floor[];
+    walls: Wall[];
+    collapsedParents: Record<string, boolean>;
+    draggedId: string | null;
+    dragOverState: { targetId: string; position: 'above' | 'on' | 'below' } | null;
+    wallsByFloor: Record<string, { wall: Wall; level: number }[]>;
+    hasActivePdf: boolean;
+    getDescendantIds: (parentId: string) => string[];
+    onToggleSelection: (id: string) => void;
+    onWallClick: (id: string) => void;
+    onUpdateFloor: (wallId: string, floorId: string) => void;
+    onCopyProperties: (wall: Wall) => void;
+    toggleParent: (parentId: string) => void;
+    handleIndentWall: (wallId: string) => void;
+    handleOutdentWall: (wallId: string) => void;
+    handleDragStart: (e: React.DragEvent, wallId: string) => void;
+    handleDragOver: (e: React.DragEvent, wallId: string) => void;
+    handleDragLeave: (wallId: string) => void;
+    handleDrop: (e: React.DragEvent) => void;
+    handleDragEnd: () => void;
+    setHighlightedWallId: (id: string | null) => void;
+    setWallToPlace: (wall: Wall) => void;
+    setAssemblyWall: (wall: Wall) => void;
+    handleDuplicateWall: (wall: Wall) => void;
+    setSelectedWall: (wall: Wall) => void;
+    handleDeleteWall: (id: string) => void;
+}
+
+const WallRow: React.FC<WallRowProps> = ({ 
+    node, 
+    selectedIds, 
+    isClicked, 
+    floors, 
+    walls,
+    collapsedParents,
+    draggedId,
+    dragOverState,
+    wallsByFloor,
+    hasActivePdf,
+    getDescendantIds,
+    onToggleSelection, 
+    onWallClick, 
+    onUpdateFloor, 
+    onCopyProperties,
+    toggleParent,
+    handleIndentWall,
+    handleOutdentWall,
+    handleDragStart,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+    handleDragEnd,
+    setHighlightedWallId,
+    setWallToPlace,
+    setAssemblyWall,
+    handleDuplicateWall,
+    setSelectedWall,
+    handleDeleteWall
+}) => {
+    const { wall, level } = node;
+    const descendants = useMemo(() => getDescendantIds(wall.id), [wall.id, getDescendantIds]);
+    const children = walls.filter(w => w.parentId === wall.id);
+    const isParent = children.length > 0;
+    const isCollapsed = collapsedParents[wall.id];
+    
+    const isSelected = selectedIds.has(wall.id);
+    const selectedDescendantsCount = useMemo(() => descendants.filter(id => selectedIds.has(id)).length, [descendants, selectedIds]);
+    const isIndeterminate = !isSelected && isParent && selectedDescendantsCount > 0;
+
+    const isBeingDragged = draggedId === wall.id || (selectedIds.has(wall.id) && selectedIds.has(draggedId || ''));
+    const isDragTarget = dragOverState?.targetId === wall.id;
+    
+    const floorId = wall.floorId || floors[0].id;
+    const flatList = wallsByFloor[floorId] || [];
+    const flatIndex = flatList.findIndex(item => item.wall.id === wall.id);
+    const canIndent = flatIndex > 0 && flatList[flatIndex - 1].level >= level;
+    const canOutdent = !!wall.parentId;
+
+    const rowRef = useRef<HTMLTableRowElement>(null);
+    useEffect(() => {
+        if (isClicked) {
+            rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }, [isClicked]);
+
+    const borderClass = isDragTarget ? (
+        dragOverState.position === 'above' ? 'border-t-2 border-indigo-500' :
+        dragOverState.position === 'below' ? 'border-b-2 border-indigo-500' :
+        'ring-2 ring-indigo-500 ring-inset'
+    ) : (
+        isClicked ? 'bg-cyan-900/30' : 
+        isSelected ? 'bg-indigo-900/30' : 
+        'hover:bg-slate-700/50'
+    );
+
+    return (
+        <tr
+            ref={rowRef}
+            draggable
+            onDragStart={(e) => handleDragStart(e, wall.id)}
+            onDragOver={(e) => handleDragOver(e, wall.id)}
+            onDragLeave={() => handleDragLeave(wall.id)}
+            onDrop={handleDrop}
+            onDragEnd={handleDragEnd}
+            className={`transition-colors border-b border-slate-700/50 ${borderClass} ${isBeingDragged ? 'opacity-40' : ''} cursor-pointer`}
+            onClick={() => onWallClick(wall.id)}
+            onMouseEnter={() => setHighlightedWallId(wall.id)}
+            onMouseLeave={() => setHighlightedWallId(null)}
+        >
+            <td className="p-3 w-10 text-center" onClick={(e) => e.stopPropagation()}>
+                <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded bg-slate-700 border-slate-600 text-indigo-500 focus:ring-indigo-600 cursor-pointer"
+                    checked={isSelected}
+                    ref={el => { if (el) el.indeterminate = isIndeterminate; }}
+                    onChange={() => onToggleSelection(wall.id)}
+                />
+            </td>
+            <td className="p-3">
+                <div className="flex items-center" style={{ paddingLeft: `${level * 1.5}rem` }}>
+                    <div className="drag-handle cursor-move text-slate-500 hover:text-slate-300 mr-2" onMouseDown={e => e.stopPropagation()}>
+                        <GripVerticalIcon className="w-4 h-4" />
+                    </div>
+                    {isParent && (
+                        <button onClick={(e) => { e.stopPropagation(); toggleParent(wall.id); }} className="p-1 rounded hover:bg-slate-600 mr-1">
+                            {isCollapsed ? <ChevronRightIcon className="w-3 h-3 text-slate-400" /> : <ChevronDownIcon className="w-3 h-3 text-slate-400" />}
+                        </button>
+                    )}
+                    {!isParent && <div className="w-5 mr-1" />}
+                    <span className="font-medium text-slate-200">{wall.name}</span>
+                    <div className="flex ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+                         <button onClick={(e) => { e.stopPropagation(); handleOutdentWall(wall.id); }} disabled={!canOutdent} className="p-1 text-slate-500 hover:text-white disabled:opacity-0"><ArrowLeftIcon className="w-3 h-3" /></button>
+                         <button onClick={(e) => { e.stopPropagation(); handleIndentWall(wall.id); }} disabled={!canIndent} className="p-1 text-slate-500 hover:text-white disabled:opacity-0"><ArrowRightIcon className="w-3 h-3" /></button>
+                    </div>
+                </div>
+            </td>
+            <td className="p-3 text-slate-300 font-mono text-sm whitespace-nowrap">{formatLengthFeetInches(wall.details.wallLength)}</td>
+            <td className="p-3 text-slate-300 font-mono text-sm whitespace-nowrap">{formatHeight(wall.details.wallHeight)}</td>
+            <td className="p-3 text-slate-300 text-sm whitespace-nowrap">
+                <span className="px-2 py-0.5 rounded bg-slate-700 border border-slate-600">{wall.details.studSize}</span>
+                <span className="ml-1 text-slate-400">@{wall.details.studSpacing}"</span>
+            </td>
+             <td className="p-3 text-slate-300 text-sm whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                <select 
+                    value={wall.floorId || floors[0].id} 
+                    onChange={(e) => onUpdateFloor(wall.id, e.target.value)}
+                    className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-indigo-500 outline-none max-w-[100px]"
+                >
+                    {floors.map(f => (
+                        <option key={f.id} value={f.id}>{f.name}</option>
+                    ))}
+                </select>
+            </td>
+            <td className="p-3 text-slate-400 text-xs">
+               <div className="flex flex-col gap-1">
+                    {wall.details.doubleTopPlate && <span className="text-yellow-500/80">Double Top</span>}
+                    {wall.details.pressureTreatedBottomPlate && <span className="text-green-500/80">PT Bottom</span>}
+                    {wall.details.blockingRows > 0 && <span className="text-orange-400/80">{wall.details.blockingRows} Row{wall.details.blockingRows > 1 ? 's' : ''} Block</span>}
+                    {wall.details.sheathing && <span className="text-amber-300/80">Sheathed</span>}
+               </div>
+            </td>
+            <td className="p-3 text-slate-300 text-sm">
+                {wall.details.openings.length > 0 ? (
+                    <div className="flex gap-2 text-xs">
+                         {wall.details.openings.filter(o => o.type === 'window').length > 0 && 
+                            <span className="bg-sky-900/50 text-sky-300 px-1.5 py-0.5 rounded">{wall.details.openings.filter(o => o.type === 'window').reduce((a,b)=>a+b.quantity,0)} Win</span>
+                         }
+                         {wall.details.openings.filter(o => o.type === 'door').length > 0 && 
+                            <span className="bg-orange-900/50 text-orange-300 px-1.5 py-0.5 rounded">{wall.details.openings.filter(o => o.type === 'door').reduce((a,b)=>a+b.quantity,0)} Door</span>
+                         }
+                    </div>
+                ) : <span className="text-slate-600">-</span>}
+            </td>
+            <td className="p-3">
+                <div className="flex items-center gap-1">
+                     {hasActivePdf && !wall.pdfPosition && (<button onClick={(e) => { e.stopPropagation(); setWallToPlace(wall);}} className="p-1.5 text-slate-400 hover:text-purple-400 rounded hover:bg-slate-700" title="Place on Plan"><MapPinIcon className="w-4 h-4"/></button>)}
+                    <button onClick={(e) => { e.stopPropagation(); onCopyProperties(wall); }} className="p-1.5 text-slate-400 hover:text-blue-400 rounded hover:bg-slate-700" title="Copy Properties"><ClipboardCopyIcon className="w-4 h-4"/></button>
+                    <button onClick={(e) => { e.stopPropagation(); setAssemblyWall(wall); }} className="p-1.5 text-slate-400 hover:text-cyan-400 rounded hover:bg-slate-700" title="Assembly View"><AssemblyViewIcon className="w-4 h-4"/></button>
+                    <button onClick={(e) => { e.stopPropagation(); handleDuplicateWall(wall);}} className="p-1.5 text-slate-400 hover:text-indigo-400 rounded hover:bg-slate-700" title="Duplicate Wall"><DuplicateIcon className="w-4 h-4"/></button>
+                    <button onClick={(e) => { e.stopPropagation(); setSelectedWall(wall);}} className="p-1.5 text-slate-400 hover:text-indigo-400 rounded hover:bg-slate-700" title="Edit Wall"><EditIcon className="w-4 h-4"/></button>
+                    <button onClick={(e) => { e.stopPropagation(); handleDeleteWall(wall.id);}} className="p-1.5 text-slate-400 hover:text-red-400 rounded hover:bg-red-900/30" title="Delete Wall"><TrashIcon className="w-4 h-4"/></button>
+                </div>
+            </td>
+        </tr>
+    );
+};
+
 const App: React.FC = () => {
     const [walls, setWalls] = useState<Wall[]>([]);
     const [floors, setFloors] = useState<Floor[]>([{ id: 'floor-1', name: '1st Floor', elevation: 0 }]);
@@ -1410,144 +1601,6 @@ const App: React.FC = () => {
         // setSelectedWallIds(new Set()); 
     };
 
-    const WallRow: React.FC<{ 
-        node: { wall: Wall; level: number }; 
-        selectedIds: Set<string>;
-        isClicked: boolean;
-        floors: Floor[];
-        onToggleSelection: (id: string) => void;
-        onWallClick: (id: string) => void;
-        onUpdateFloor: (wallId: string, floorId: string) => void;
-        onCopyProperties: (wall: Wall) => void;
-    }> = ({ node, selectedIds, isClicked, floors, onToggleSelection, onWallClick, onUpdateFloor, onCopyProperties }) => {
-        const { wall, level } = node;
-        const descendants = useMemo(() => getDescendantIds(wall.id), [wall.id, getDescendantIds]);
-        const children = walls.filter(w => w.parentId === wall.id);
-        const isParent = children.length > 0;
-        const isCollapsed = collapsedParents[wall.id];
-        
-        const isSelected = selectedIds.has(wall.id);
-        const selectedDescendantsCount = useMemo(() => descendants.filter(id => selectedIds.has(id)).length, [descendants, selectedIds]);
-        const isIndeterminate = !isSelected && isParent && selectedDescendantsCount > 0;
-
-        const isBeingDragged = draggedId === wall.id || (selectedIds.has(wall.id) && selectedIds.has(draggedId || ''));
-        const isDragTarget = dragOverState?.targetId === wall.id;
-        
-        const floorId = wall.floorId || floors[0].id;
-        const flatList = wallsByFloor[floorId] || [];
-        const flatIndex = flatList.findIndex(item => item.wall.id === wall.id);
-        const canIndent = flatIndex > 0 && flatList[flatIndex - 1].level >= level;
-        const canOutdent = !!wall.parentId;
-
-        const rowRef = useRef<HTMLTableRowElement>(null);
-        useEffect(() => {
-            if (isClicked) {
-                rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-        }, [isClicked]);
-
-        const borderClass = isDragTarget ? (
-            dragOverState.position === 'above' ? 'border-t-2 border-indigo-500' :
-            dragOverState.position === 'below' ? 'border-b-2 border-indigo-500' :
-            'ring-2 ring-indigo-500 ring-inset'
-        ) : (
-            isClicked ? 'bg-cyan-900/30' : 
-            isSelected ? 'bg-indigo-900/30' : 
-            'hover:bg-slate-700/50'
-        );
-
-        return (
-            <tr
-                ref={rowRef}
-                draggable
-                onDragStart={(e) => handleDragStart(e, wall.id)}
-                onDragOver={(e) => handleDragOver(e, wall.id)}
-                onDragLeave={() => handleDragLeave(wall.id)}
-                onDrop={handleDrop}
-                onDragEnd={handleDragEnd}
-                className={`transition-colors border-b border-slate-700/50 ${borderClass} ${isBeingDragged ? 'opacity-40' : ''} cursor-pointer`}
-                onClick={() => onWallClick(wall.id)}
-                onMouseEnter={() => setHighlightedWallId(wall.id)}
-                onMouseLeave={() => setHighlightedWallId(null)}
-            >
-                <td className="p-3 w-10 text-center" onClick={(e) => e.stopPropagation()}>
-                    <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded bg-slate-700 border-slate-600 text-indigo-500 focus:ring-indigo-600 cursor-pointer"
-                        checked={isSelected}
-                        ref={el => { if (el) el.indeterminate = isIndeterminate; }}
-                        onChange={() => onToggleSelection(wall.id)}
-                    />
-                </td>
-                <td className="p-3">
-                    <div className="flex items-center" style={{ paddingLeft: `${level * 1.5}rem` }}>
-                        <div className="drag-handle cursor-move text-slate-500 hover:text-slate-300 mr-2" onMouseDown={e => e.stopPropagation()}>
-                            <GripVerticalIcon className="w-4 h-4" />
-                        </div>
-                        {isParent && (
-                            <button onClick={(e) => { e.stopPropagation(); toggleParent(wall.id); }} className="p-1 rounded hover:bg-slate-600 mr-1">
-                                {isCollapsed ? <ChevronRightIcon className="w-3 h-3 text-slate-400" /> : <ChevronDownIcon className="w-3 h-3 text-slate-400" />}
-                            </button>
-                        )}
-                        {!isParent && <div className="w-5 mr-1" />}
-                        <span className="font-medium text-slate-200">{wall.name}</span>
-                        <div className="flex ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
-                             <button onClick={(e) => { e.stopPropagation(); handleOutdentWall(wall.id); }} disabled={!canOutdent} className="p-1 text-slate-500 hover:text-white disabled:opacity-0"><ArrowLeftIcon className="w-3 h-3" /></button>
-                             <button onClick={(e) => { e.stopPropagation(); handleIndentWall(wall.id); }} disabled={!canIndent} className="p-1 text-slate-500 hover:text-white disabled:opacity-0"><ArrowRightIcon className="w-3 h-3" /></button>
-                        </div>
-                    </div>
-                </td>
-                <td className="p-3 text-slate-300 font-mono text-sm whitespace-nowrap">{formatLengthFeetInches(wall.details.wallLength)}</td>
-                <td className="p-3 text-slate-300 font-mono text-sm whitespace-nowrap">{formatHeight(wall.details.wallHeight)}</td>
-                <td className="p-3 text-slate-300 text-sm whitespace-nowrap">
-                    <span className="px-2 py-0.5 rounded bg-slate-700 border border-slate-600">{wall.details.studSize}</span>
-                    <span className="ml-1 text-slate-400">@{wall.details.studSpacing}"</span>
-                </td>
-                 <td className="p-3 text-slate-300 text-sm whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                    <select 
-                        value={wall.floorId || floors[0].id} 
-                        onChange={(e) => onUpdateFloor(wall.id, e.target.value)}
-                        className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-indigo-500 outline-none max-w-[100px]"
-                    >
-                        {floors.map(f => (
-                            <option key={f.id} value={f.id}>{f.name}</option>
-                        ))}
-                    </select>
-                </td>
-                <td className="p-3 text-slate-400 text-xs">
-                   <div className="flex flex-col gap-1">
-                        {wall.details.doubleTopPlate && <span className="text-yellow-500/80">Double Top</span>}
-                        {wall.details.pressureTreatedBottomPlate && <span className="text-green-500/80">PT Bottom</span>}
-                        {wall.details.blockingRows > 0 && <span className="text-orange-400/80">{wall.details.blockingRows} Row{wall.details.blockingRows > 1 ? 's' : ''} Block</span>}
-                        {wall.details.sheathing && <span className="text-amber-300/80">Sheathed</span>}
-                   </div>
-                </td>
-                <td className="p-3 text-slate-300 text-sm">
-                    {wall.details.openings.length > 0 ? (
-                        <div className="flex gap-2 text-xs">
-                             {wall.details.openings.filter(o => o.type === 'window').length > 0 && 
-                                <span className="bg-sky-900/50 text-sky-300 px-1.5 py-0.5 rounded">{wall.details.openings.filter(o => o.type === 'window').reduce((a,b)=>a+b.quantity,0)} Win</span>
-                             }
-                             {wall.details.openings.filter(o => o.type === 'door').length > 0 && 
-                                <span className="bg-orange-900/50 text-orange-300 px-1.5 py-0.5 rounded">{wall.details.openings.filter(o => o.type === 'door').reduce((a,b)=>a+b.quantity,0)} Door</span>
-                             }
-                        </div>
-                    ) : <span className="text-slate-600">-</span>}
-                </td>
-                <td className="p-3">
-                    <div className="flex items-center gap-1">
-                         {activePdfFile && !wall.pdfPosition && (<button onClick={(e) => { e.stopPropagation(); setWallToPlace(wall);}} className="p-1.5 text-slate-400 hover:text-purple-400 rounded hover:bg-slate-700" title="Place on Plan"><MapPinIcon className="w-4 h-4"/></button>)}
-                        <button onClick={(e) => { e.stopPropagation(); onCopyProperties(wall); }} className="p-1.5 text-slate-400 hover:text-blue-400 rounded hover:bg-slate-700" title="Copy Properties"><ClipboardCopyIcon className="w-4 h-4"/></button>
-                        <button onClick={(e) => { e.stopPropagation(); setAssemblyWall(wall); }} className="p-1.5 text-slate-400 hover:text-cyan-400 rounded hover:bg-slate-700" title="Assembly View"><AssemblyViewIcon className="w-4 h-4"/></button>
-                        <button onClick={(e) => { e.stopPropagation(); handleDuplicateWall(wall);}} className="p-1.5 text-slate-400 hover:text-indigo-400 rounded hover:bg-slate-700" title="Duplicate Wall"><DuplicateIcon className="w-4 h-4"/></button>
-                        <button onClick={(e) => { e.stopPropagation(); setSelectedWall(wall);}} className="p-1.5 text-slate-400 hover:text-indigo-400 rounded hover:bg-slate-700" title="Edit Wall"><EditIcon className="w-4 h-4"/></button>
-                        <button onClick={(e) => { e.stopPropagation(); handleDeleteWall(wall.id);}} className="p-1.5 text-slate-400 hover:text-red-400 rounded hover:bg-red-900/30" title="Delete Wall"><TrashIcon className="w-4 h-4"/></button>
-                    </div>
-                </td>
-            </tr>
-        );
-    };
-
     return (
         <>
             <input type="file" ref={fileInputRef} onChange={handleLoadProjectFile} accept=".framingpro,.json" className="hidden" />
@@ -1744,12 +1797,33 @@ const App: React.FC = () => {
                                                                         key={item.wall.id} 
                                                                         node={item} 
                                                                         floors={floors}
+                                                                        walls={walls}
+                                                                        collapsedParents={collapsedParents}
+                                                                        draggedId={draggedId}
+                                                                        dragOverState={dragOverState}
+                                                                        wallsByFloor={wallsByFloor}
+                                                                        hasActivePdf={!!activePdfFile}
                                                                         selectedIds={selectedWallIds}
                                                                         isClicked={item.wall.id === clickedWallId}
+                                                                        getDescendantIds={getDescendantIds}
                                                                         onToggleSelection={handleToggleWallSelection}
                                                                         onWallClick={handleSetClickedWall}
                                                                         onUpdateFloor={handleUpdateWallFloor}
                                                                         onCopyProperties={handleCopyWallProperties}
+                                                                        toggleParent={toggleParent}
+                                                                        handleIndentWall={handleIndentWall}
+                                                                        handleOutdentWall={handleOutdentWall}
+                                                                        handleDragStart={handleDragStart}
+                                                                        handleDragOver={handleDragOver}
+                                                                        handleDragLeave={handleDragLeave}
+                                                                        handleDrop={handleDrop}
+                                                                        handleDragEnd={handleDragEnd}
+                                                                        setHighlightedWallId={setHighlightedWallId}
+                                                                        setWallToPlace={setWallToPlace}
+                                                                        setAssemblyWall={setAssemblyWall}
+                                                                        handleDuplicateWall={handleDuplicateWall}
+                                                                        setSelectedWall={setSelectedWall}
+                                                                        handleDeleteWall={handleDeleteWall}
                                                                     />
                                                                 ))}
                                                             </>
@@ -1771,12 +1845,33 @@ const App: React.FC = () => {
                                                                     key={wall.id}
                                                                     node={{ wall, level: 0 }}
                                                                     floors={floors}
+                                                                    walls={walls}
+                                                                    collapsedParents={collapsedParents}
+                                                                    draggedId={draggedId}
+                                                                    dragOverState={dragOverState}
+                                                                    wallsByFloor={wallsByFloor}
+                                                                    hasActivePdf={!!activePdfFile}
                                                                     selectedIds={selectedWallIds}
                                                                     isClicked={wall.id === clickedWallId}
+                                                                    getDescendantIds={getDescendantIds}
                                                                     onToggleSelection={handleToggleWallSelection}
                                                                     onWallClick={handleSetClickedWall}
                                                                     onUpdateFloor={handleUpdateWallFloor}
                                                                     onCopyProperties={handleCopyWallProperties}
+                                                                    toggleParent={toggleParent}
+                                                                    handleIndentWall={handleIndentWall}
+                                                                    handleOutdentWall={handleOutdentWall}
+                                                                    handleDragStart={handleDragStart}
+                                                                    handleDragOver={handleDragOver}
+                                                                    handleDragLeave={handleDragLeave}
+                                                                    handleDrop={handleDrop}
+                                                                    handleDragEnd={handleDragEnd}
+                                                                    setHighlightedWallId={setHighlightedWallId}
+                                                                    setWallToPlace={setWallToPlace}
+                                                                    setAssemblyWall={setAssemblyWall}
+                                                                    handleDuplicateWall={handleDuplicateWall}
+                                                                    setSelectedWall={setSelectedWall}
+                                                                    handleDeleteWall={handleDeleteWall}
                                                                  />
                                                              ))}
                                                         </>

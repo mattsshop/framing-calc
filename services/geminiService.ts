@@ -1,15 +1,17 @@
 
 import { GoogleGenAI } from "@google/genai";
 import type { Wall, Opening } from '../types';
+import { GEMINI_API_KEY } from '../config';
 
 // Declare process to satisfy TypeScript in browser environments where types/node might be missing
 declare const process: any;
 
 // Vite exposes env variables via import.meta.env. VITE_ prefix is required for client-side exposure.
 // We fallback to process.env for local Node/compatible environments, safely checking if process exists.
+// Finally, we check the local config.ts file.
 const viteEnv = (import.meta as any).env;
 const processEnv = typeof process !== 'undefined' ? process.env : {};
-const apiKey = viteEnv?.VITE_API_KEY || processEnv?.API_KEY;
+const apiKey = viteEnv?.VITE_API_KEY || processEnv?.API_KEY || GEMINI_API_KEY;
 
 const ai = new GoogleGenAI({ apiKey: apiKey as string });
 
