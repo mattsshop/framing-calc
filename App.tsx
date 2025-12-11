@@ -5,6 +5,7 @@ import WallEditor from './components/WallEditor';
 import PdfViewer from './components/PdfViewer';
 import Project3DViewer from './components/Project3DViewer';
 import PopOutWindow from './components/PopOutWindow';
+import LandingPage from './components/LandingPage';
 import { calculateProjectMaterials } from './services/calculationService';
 import { getProTip } from './services/geminiService';
 import { generateMaterialListPdf, generateMaterialReportPdf, drawWallOnCanvas } from './services/pdfService';
@@ -655,6 +656,7 @@ const App: React.FC = () => {
     
     // Auth State
     const [user, setUser] = useState<User | null>(null);
+    const [isAuthLoading, setIsAuthLoading] = useState(true);
 
     // Updated: Store PDF file per floor
     const [floorPdfs, setFloorPdfs] = useState<Record<string, File>>({});
@@ -697,7 +699,10 @@ const App: React.FC = () => {
     const [isPdfDetached, setIsPdfDetached] = useState(false);
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(setUser);
+        const unsubscribe = onAuthStateChanged((user) => {
+            setUser(user);
+            setIsAuthLoading(false);
+        });
         return () => unsubscribe();
     }, []);
 
@@ -1601,6 +1606,21 @@ const App: React.FC = () => {
         // setSelectedWallIds(new Set()); 
     };
 
+    if (isAuthLoading) {
+        return (
+            <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-slate-400 animate-pulse">Checking authentication...</span>
+                </div>
+            </div>
+        );
+    }
+
+    if (!user) {
+        return <LandingPage onLogin={handleGoogleSignIn} />;
+    }
+
     return (
         <>
             <input type="file" ref={fileInputRef} onChange={handleLoadProjectFile} accept=".framingpro,.json" className="hidden" />
@@ -1701,20 +1721,13 @@ const App: React.FC = () => {
 
                                 <div className="w-px h-8 bg-slate-700 mx-1"></div>
                                 
-                                {user ? (
-                                    <button onClick={handleSignOut} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 px-4 rounded-lg transition border border-slate-600" title={`Signed in as ${user.email}`}>
-                                        <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-xs font-bold overflow-hidden">
-                                            {user.photoURL ? <img src={user.photoURL} alt="User" className="w-full h-full object-cover" /> : (user.email ? user.email[0].toUpperCase() : 'U')}
-                                        </div>
-                                        <span className="hidden md:inline text-xs">{user.displayName || user.email?.split('@')[0]}</span>
-                                        <LogoutIcon className="w-4 h-4 text-slate-400" />
-                                    </button>
-                                ) : (
-                                    <button onClick={handleGoogleSignIn} className="flex items-center gap-2 bg-white text-slate-800 font-semibold py-2 px-4 rounded-lg transition hover:bg-slate-200">
-                                        <GoogleIcon className="w-5 h-5 text-red-500" />
-                                        <span className="hidden md:inline">Login</span>
-                                    </button>
-                                )}
+                                <button onClick={handleSignOut} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 px-4 rounded-lg transition border border-slate-600" title={`Signed in as ${user.email}`}>
+                                    <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-xs font-bold overflow-hidden">
+                                        {user.photoURL ? <img src={user.photoURL} alt="User" className="w-full h-full object-cover" /> : (user.email ? user.email[0].toUpperCase() : 'U')}
+                                    </div>
+                                    <span className="hidden md:inline text-xs">{user.displayName || user.email?.split('@')[0]}</span>
+                                    <LogoutIcon className="w-4 h-4 text-slate-400" />
+                                </button>
                             </div>
                         </div>
                     </header>
