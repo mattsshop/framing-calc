@@ -156,6 +156,12 @@ const WallVisualization: React.FC<WallVisualizationProps> = ({ details }) => {
 
             cripplesAboveHeight = headerYInches - topPlateHeight;
             jackHeightInches = opening.height; 
+        } else if (opening.type === 'window') {
+            // Apply Header Drop (Top Offset)
+            cripplesAboveHeight = opening.headerTopOffset || 0;
+            headerYInches = topPlateHeight + cripplesAboveHeight;
+            // Jack height goes from bottom plate to bottom of header
+            jackHeightInches = (wallHeight - bottomPlateHeight) - (headerYInches + headerHeightInches);
         }
 
         const headerY = headerYInches * scale;
@@ -163,9 +169,12 @@ const WallVisualization: React.FC<WallVisualizationProps> = ({ details }) => {
         const headerH = headerHeightInches * scale;
 
         const jackH = jackHeightInches * scale;
+        // Jacks start at bottom of header and go down? No, usually visualized top down or bottom up.
+        // CSS 'top' is distance from top.
+        // Jack Top is bottom of header.
         const jackTopY = headerY + headerH;
 
-        // Kings
+        // Kings (Full height usually, unless platform framed differently, but here treated as full stud length)
         for (let k = 0; k < opening.kingStudsPerSide; k++) {
             elements.push(<FramingMember key={`king-left-${openingId}-${k}`} left={(frameStart + k * STUD_THICKNESS) * scale} top={studY} width={studW} height={studH} color="bg-yellow-800" />);
         }
@@ -186,8 +195,8 @@ const WallVisualization: React.FC<WallVisualizationProps> = ({ details }) => {
         // Header
         elements.push(<FramingMember key={`header-${openingId}`} left={headerStartInches * scale} top={headerY} width={headerW} height={headerH} color="bg-red-700" />);
         
-        // Cripples Above (Doors)
-        if (cripplesAboveHeight > 1.5) {
+        // Cripples Above
+        if (cripplesAboveHeight > 0.1) {
             const cripH = cripplesAboveHeight * scale;
             let crippleXPos = Math.ceil(headerStartInches / studSpacing) * studSpacing;
             while (crippleXPos < headerStartInches + headerLengthInches) {
@@ -208,19 +217,22 @@ const WallVisualization: React.FC<WallVisualizationProps> = ({ details }) => {
 
         if(isWindow){
             // Sill Plate
-            const sillY = (topPlateHeight * scale) + headerH + (opening.height * scale);
+            const sillY = (headerYInches + headerHeightInches + opening.height) * scale;
             const sillH = PLATE_THICKNESS * scale;
             elements.push(<FramingMember key={`sill-${openingId}`} left={headerStartInches * scale} top={sillY} width={headerW} height={sillH} color="bg-yellow-600" />);
 
             // Cripples below sill
             const cripplesBelowY = sillY + sillH;
             const cripplesBelowH = canvasHeight - cripplesBelowY - (bottomPlateHeight * scale);
-            let crippleXPos = Math.ceil(headerStartInches / studSpacing) * studSpacing;
-             while (crippleXPos < headerStartInches + headerLengthInches) {
-                 if (crippleXPos > headerStartInches && crippleXPos < headerStartInches + headerLengthInches) {
-                    elements.push(<FramingMember key={`cripple-below-${openingId}-${crippleXPos}`} left={(crippleXPos - (STUD_THICKNESS/2)) * scale} top={cripplesBelowY} width={studW} height={cripplesBelowH} color="bg-yellow-700" />);
-                 }
-                crippleXPos += studSpacing;
+            
+            if (cripplesBelowH > 0) {
+                let crippleXPos = Math.ceil(headerStartInches / studSpacing) * studSpacing;
+                while (crippleXPos < headerStartInches + headerLengthInches) {
+                    if (crippleXPos > headerStartInches && crippleXPos < headerStartInches + headerLengthInches) {
+                        elements.push(<FramingMember key={`cripple-below-${openingId}-${crippleXPos}`} left={(crippleXPos - (STUD_THICKNESS/2)) * scale} top={cripplesBelowY} width={studW} height={cripplesBelowH} color="bg-yellow-700" />);
+                    }
+                    crippleXPos += studSpacing;
+                }
             }
         }
         

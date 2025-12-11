@@ -149,8 +149,8 @@ const calculateWallCuts = (details: WallDetails): RawCuts => {
         const op = layout.opening;
         const headerLength = op.width + (op.jackStudsPerSide * STUD_THICKNESS * 2);
 
-        // King and Jack studs
-        const fullLengthStudsNeeded = (op.kingStudsPerSide * 2) + (op.jackStudsPerSide * 2);
+        // King studs (Full Height)
+        const fullLengthStudsNeeded = (op.kingStudsPerSide * 2);
         for(let j = 0; j < fullLengthStudsNeeded; j++) {
             allStudLengths.push(commonStudLength);
         }
@@ -158,8 +158,37 @@ const calculateWallCuts = (details: WallDetails): RawCuts => {
         const headerHeight = headerHeights[op.headerSize];
 
         if (op.type === 'window') {
+            // Header Position Logic
+            // Default tight to top plate, but can be offset down
+            const crippleAboveLength = op.headerTopOffset || 0;
+            const headerTopY = topPlateHeight + crippleAboveLength;
+            
+            // Jack Studs run from bottom plate to bottom of header
+            // Jack Length = (WallHeight - BottomPlate) - (HeaderTop + HeaderHeight)
+            // Or simpler: CommonStudLength - CrippleAbove - HeaderHeight
+            const jackLength = commonStudLength - crippleAboveLength - headerHeight;
+            
+            // Add Jacks
+            for(let j = 0; j < (op.jackStudsPerSide * 2); j++) {
+                allStudLengths.push(jackLength);
+            }
+
+            // Cripples Above
+            if (crippleAboveLength > 0) {
+                 const numCripplePositions = Math.floor(headerLength / studSpacing);
+                 for (let k = 0; k < numCripplePositions; k++) {
+                     allStudLengths.push(crippleAboveLength);
+                 }
+            }
+
             addOtherCut(`${studSize} Plate`, headerLength); // Sill plate
-            const crippleBelowLength = wallHeight - topPlateHeight - bottomPlateHeight - headerHeight - op.height - PLATE_THICKNESS;
+            
+            // Cripples Below Sill
+            // Sill Top Y = HeaderTopY + HeaderHeight + WindowHeight
+            // Cripple Below Length = WallHeight - BottomPlateHeight - SillTopY - SillPlateThickness
+            const sillTopY = headerTopY + headerHeight + op.height;
+            const crippleBelowLength = wallHeight - bottomPlateHeight - sillTopY - PLATE_THICKNESS;
+
             if(crippleBelowLength > 0){
                 const numCripplePositions = Math.floor(headerLength / studSpacing);
                 for (let k = 0; k < numCripplePositions; k++) {
@@ -171,6 +200,13 @@ const calculateWallCuts = (details: WallDetails): RawCuts => {
             const topOfHeaderY = op.height + headerHeight;
             const bottomOfTopPlateY = wallHeight - topPlateHeight;
             const crippleAboveLength = bottomOfTopPlateY - topOfHeaderY;
+
+            // Jacks for Door usually run floor (or bottom plate if seated) to header
+            // Assuming seated on bottom plate for now as per geometry service default
+            const jackLength = op.height;
+             for(let j = 0; j < (op.jackStudsPerSide * 2); j++) {
+                allStudLengths.push(jackLength);
+            }
 
             if (crippleAboveLength > 0) {
                     const numCripplePositions = Math.floor(headerLength / studSpacing);
@@ -192,6 +228,7 @@ const calculateWallCuts = (details: WallDetails): RawCuts => {
 
     // Classify Studs
     allStudLengths.forEach(len => {
+        if (len <= 0) return;
         if (isApprox(len, 92.625)) raw.precut92.count++;
         else if (isApprox(len, 104.625)) raw.precut104.count++;
         else raw.studCuts.push({ length: len, size: studSize });

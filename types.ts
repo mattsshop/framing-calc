@@ -13,13 +13,14 @@ export interface Opening {
     kingStudsPerSide: number;
     jackStudsPerSide: number;
     centerOffset?: number; // Distance from start of wall to center of opening
+    headerTopOffset?: number; // Distance from bottom of top plate to top of header (Header Drop)
 }
 
 export interface WallDetails {
     wallLength: number; // inches
     wallHeight: number; // inches
     studSize: StudSize;
-    studSpacing: 16 | 24;
+    studSpacing: 8 | 12 | 16 | 24;
     studsOnCenter: 1 | 2 | 3 | 4;
     doubleTopPlate: boolean;
     pressureTreatedBottomPlate: boolean;

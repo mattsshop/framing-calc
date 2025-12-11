@@ -46,20 +46,6 @@ export const calculateOpeningLayouts = (wallLength: number, openings: Opening[])
     const activeOpenings = openings.filter(op => op.quantity > 0 && op.width > 0);
     if (activeOpenings.length === 0) return [];
 
-    // Separate manual positioning vs auto positioning
-    // Note: If quantity > 1, manual positioning (centerOffset) is ambiguous. 
-    // We will assume if centerOffset is present, quantity should ideally be 1.
-    // If quantity > 1 and centerOffset is present, we might just stack them or ignore offset for subsequent ones.
-    // For simplicity: If centerOffset is set, we treat it as a fixed position. 
-    // If NOT set, we flow it in the 'auto' stream.
-
-    // However, to keep spacing even for auto items, we need to know how much space is left.
-    // This is complex. Let's simplify:
-    // 1. Place all manually positioned openings first.
-    // 2. Calculate remaining space and place auto openings in the gaps? 
-    //    Or just auto-space everything that doesn't have an offset?
-    //    Let's go with: Auto-spacing applies to ALL openings that don't have an offset.
-    
     const manualOpenings: PositionedOpening[] = [];
     const autoOpenings: Opening[] = [];
 
@@ -91,7 +77,6 @@ export const calculateOpeningLayouts = (wallLength: number, openings: Opening[])
         const totalAutoWidth = autoOpenings.reduce((sum, op) => sum + op.width + 2 * (op.kingStudsPerSide * STUD_THICKNESS) + 2 * (op.jackStudsPerSide * STUD_THICKNESS), 0);
         
         // We simply flow auto openings in the available wall length, ignoring manual ones for collision for now (simpler MVP)
-        // Or better: Distribute them evenly across the whole wall, overlapping if manual is there (user must fix).
         const spacing = (wallLength - totalAutoWidth) / (autoOpenings.length + 1);
         let currentX = spacing;
         
@@ -252,6 +237,24 @@ export const generateWallMembers = (details: WallDetails): Member3D[] => {
                  crippleAboveHeight = 0;
              }
              jackHeight = opening.height; 
+        } else if (opening.type === 'window') {
+            // Apply header top offset (Header Drop)
+            crippleAboveHeight = opening.headerTopOffset || 0;
+            headerYPos = topPlateHeight + crippleAboveHeight;
+            // Jack height is driven by where the header sits relative to the floor
+            // But visually, the jack goes from bottom plate to bottom of header?
+            // No, jack goes from bottom plate (or sill) to bottom of header.
+            // Wait, window jacks usually sit on the sill? No, usually jacks go all the way up to header, and sill sits between them.
+            // Actually, typical framing: Jacks run from Bottom Plate to Header. Sill sits between Jacks.
+            // So Jack Height is bottom plate to header bottom.
+            // height of jack = (headerYPos + headerHeight) - (wallHeight - bottomPlate) <-- invalid math direction.
+            // Y is 0 at top. Bottom plate is at wallHeight - bottomPlateHeight.
+            // Header Bottom Y is headerYPos + headerH.
+            // So Jack Height = (wallHeight - bottomPlateHeight) - (headerYPos + headerH).
+            jackHeight = (wallHeight - bottomPlateHeight) - (headerYPos + headerH);
+            
+            // Safety check for impossible geometry
+            if (jackHeight < 0) jackHeight = 0;
         }
 
         // Kings and Jacks
@@ -260,6 +263,7 @@ export const generateWallMembers = (details: WallDetails): Member3D[] => {
             members.push({ id, name, x: (frameStart + k * STUD_THICKNESS), y: topPlateHeight, z: 0, w: STUD_THICKNESS, h: studHeight, d: studDepth, type: 'king-jack' });
         }
         for (let j = 0; j < opening.jackStudsPerSide; j++) { // Left Jacks
+             // For windows, we assume jack runs full height to header.
              const { id, name } = getMemberData(studSize, jackHeight, 'jack');
              const jackY = headerYPos + headerH;
              members.push({ id, name, x: (frameStart + leftKingStudsWidth + j * STUD_THICKNESS), y: jackY, z: 0, w: STUD_THICKNESS, h: jackHeight, d: studDepth, type: 'king-jack' });
@@ -306,14 +310,17 @@ export const generateWallMembers = (details: WallDetails): Member3D[] => {
 
             const cripplesBelowY = sillY + PLATE_THICKNESS;
             const cripplesBelowHeight = wallHeight - cripplesBelowY - bottomPlateHeight;
-            let crippleXPos = Math.ceil(headerStartX / studSpacing) * studSpacing;
-             while (crippleXPos < headerStartX + headerWidthInches) {
-                 if (crippleXPos > headerStartX) {
-                    const { id, name } = getMemberData(studSize, cripplesBelowHeight, 'cripple');
-                    members.push({ id, name, x: (crippleXPos - (STUD_THICKNESS / 2)), y: cripplesBelowY, z: 0, w: STUD_THICKNESS, h: cripplesBelowHeight, d: studDepth, type: 'cripple' });
-                 }
-                 crippleXPos += studSpacing;
-             }
+            
+            if (cripplesBelowHeight > 0) {
+                let crippleXPos = Math.ceil(headerStartX / studSpacing) * studSpacing;
+                while (crippleXPos < headerStartX + headerWidthInches) {
+                    if (crippleXPos > headerStartX) {
+                        const { id, name } = getMemberData(studSize, cripplesBelowHeight, 'cripple');
+                        members.push({ id, name, x: (crippleXPos - (STUD_THICKNESS / 2)), y: cripplesBelowY, z: 0, w: STUD_THICKNESS, h: cripplesBelowHeight, d: studDepth, type: 'cripple' });
+                    }
+                    crippleXPos += studSpacing;
+                }
+            }
         }
     });
 

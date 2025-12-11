@@ -34,7 +34,7 @@ const OpeningRow: React.FC<{
     };
 
     return (
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-3 items-center p-2 bg-slate-800 rounded-md">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-10 gap-3 items-center p-2 bg-slate-800 rounded-md">
             <select value={opening.type} onChange={e => handleChange('type', e.target.value)} className="bg-slate-900 border border-slate-700 rounded-md p-2">
                 <option value="window">Window</option>
                 <option value="door">Door</option>
@@ -51,6 +51,15 @@ const OpeningRow: React.FC<{
                 placeholder={opening.quantity > 1 ? "Auto" : "Center (in)"}
                 disabled={opening.quantity > 1}
                 title={opening.quantity > 1 ? "Manual positioning disabled for multiple copies" : "Distance from start of wall to center"}
+            />
+            
+            <input 
+                type="number" 
+                value={opening.headerTopOffset || ''} 
+                onChange={e => handleChange('headerTopOffset', e.target.value ? parseFloat(e.target.value) : undefined)} 
+                className="bg-slate-900 border border-slate-700 rounded-md p-2" 
+                placeholder="Drop (in)"
+                title="Distance from top plate to header"
             />
 
             <select value={opening.headerSize} onChange={e => handleChange('headerSize', e.target.value)} className="bg-slate-900 border border-slate-700 rounded-md p-2">
@@ -202,6 +211,8 @@ const WallEditor: React.FC<WallEditorProps> = ({ wall, onSave, onCancel }) => {
                     <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                         <label className="block text-sm font-medium text-slate-400 mb-2">Stud Spacing</label>
                         <select value={localWall.details.studSpacing} onChange={e => handleDetailChange('studSpacing', parseInt(e.target.value, 10))} className="w-full bg-slate-900 border border-slate-700 rounded-md p-2">
+                            <option value="8">8" O.C.</option>
+                            <option value="12">12" O.C.</option>
                             <option value="16">16" O.C.</option>
                             <option value="24">24" O.C.</option>
                         </select>
@@ -288,12 +299,13 @@ const WallEditor: React.FC<WallEditorProps> = ({ wall, onSave, onCancel }) => {
                             </div>
                         ) : (
                             <>
-                                <div className="hidden lg:grid grid-cols-9 gap-3 px-2 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                                <div className="hidden lg:grid grid-cols-10 gap-3 px-2 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">
                                     <div>Type</div>
                                     <div>Qty</div>
                                     <div>Width</div>
                                     <div>Height</div>
                                     <div>Center</div>
+                                    <div>Drop</div>
                                     <div>Header Size</div>
                                     <div>Ply</div>
                                     <div className="grid grid-cols-2 gap-2">
