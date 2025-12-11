@@ -396,58 +396,49 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, project
         const isPlacing = mode === 'PLACING_START' || mode === 'PLACING_END';
         const interactionColor = isPlacing ? 'rgba(168, 85, 247, 0.8)' : 'rgba(239, 68, 68, 0.8)'; 
         
-        if (mode === 'DRAWING_WALL' && drawingPoints.length > 0) {
+        // Draw the rubber-banding line if we have a start point
+        if (mode === 'DRAWING_WALL' && drawingPoints.length === 1 && mousePos) {
             ctx.beginPath();
             const startPt = drawingPoints[0];
             ctx.moveTo(startPt.x * zoom, startPt.y * zoom);
-
-            for (let i = 1; i < drawingPoints.length; i++) {
-                const pt = drawingPoints[i];
-                ctx.lineTo(pt.x * zoom, pt.y * zoom);
-            }
-            
-            if (mousePos) {
-                ctx.lineTo(mousePos.x * zoom, mousePos.y * zoom);
-            }
+            ctx.lineTo(mousePos.x * zoom, mousePos.y * zoom);
             
             ctx.strokeStyle = interactionColor;
             ctx.lineWidth = 2;
             ctx.stroke();
 
-            drawingPoints.forEach(p => {
-                ctx.beginPath();
-                ctx.arc(p.x * zoom, p.y * zoom, 5, 0, 2 * Math.PI);
-                ctx.fillStyle = interactionColor;
-                ctx.fill();
-            });
+            // Draw start point
+            ctx.beginPath();
+            ctx.arc(startPt.x * zoom, startPt.y * zoom, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = interactionColor;
+            ctx.fill();
 
-             if (mousePos && drawingPoints.length > 0) {
-                const lastPoint = drawingPoints[drawingPoints.length - 1];
-                ctx.setLineDash([4, 4]);
-                ctx.strokeStyle = 'rgba(250, 204, 21, 0.6)';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(0, lastPoint.y * zoom);
-                ctx.lineTo(overlay.width, lastPoint.y * zoom);
-                ctx.stroke();
-                ctx.beginPath();
-                ctx.moveTo(lastPoint.x * zoom, 0);
-                ctx.lineTo(lastPoint.x * zoom, overlay.height);
-                ctx.stroke();
-                ctx.setLineDash([]);
-                
-                // Show live length tooltip
-                if (liveLength !== null) {
-                    const midX = (lastPoint.x + mousePos.x) / 2 * zoom;
-                    const midY = (lastPoint.y + mousePos.y) / 2 * zoom;
-                    ctx.font = 'bold 12px monospace';
-                    const label = formatLength(liveLength);
-                    const tm = ctx.measureText(label);
-                    ctx.fillStyle = 'rgba(0,0,0,0.8)';
-                    ctx.fillRect(midX + 10, midY - 20, tm.width + 8, 18);
-                    ctx.fillStyle = 'white';
-                    ctx.fillText(label, midX + 14, midY - 8);
-                }
+            // Draw guidelines/extensions
+            const lastPoint = startPt;
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = 'rgba(250, 204, 21, 0.6)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, lastPoint.y * zoom);
+            ctx.lineTo(overlay.width, lastPoint.y * zoom);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(lastPoint.x * zoom, 0);
+            ctx.lineTo(lastPoint.x * zoom, overlay.height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Show live length tooltip
+            if (liveLength !== null) {
+                const midX = (lastPoint.x + mousePos.x) / 2 * zoom;
+                const midY = (lastPoint.y + mousePos.y) / 2 * zoom;
+                ctx.font = 'bold 12px monospace';
+                const label = formatLength(liveLength);
+                const tm = ctx.measureText(label);
+                ctx.fillStyle = 'rgba(0,0,0,0.8)';
+                ctx.fillRect(midX + 10, midY - 20, tm.width + 8, 18);
+                ctx.fillStyle = 'white';
+                ctx.fillText(label, midX + 14, midY - 8);
             }
         }
 
@@ -606,8 +597,25 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, project
                 setStatusMessage('Enter the real-world length for the selection.');
                 break;
             case 'DRAWING_WALL':
-                setDrawingPoints(prev => [...prev, normalizedPoint]);
-                setStatusMessage('Click to add another point to the wall. (Press Esc to cancel)');
+                const newPoints = [...drawingPoints, normalizedPoint];
+                if (newPoints.length === 2) {
+                    // Wall Complete - Create Immediately
+                    const start = newPoints[0];
+                    const end = newPoints[1];
+                    const distance = Math.hypot(end.x - start.x, end.y - start.y);
+                    if (scaleRatio && distance > 0) {
+                         const lengthInInches = distance * scaleRatio;
+                         const name = `Measured Wall ${projectWalls.length + 1}`;
+                         onAddWall(name, lengthInInches, { start, end, pageNum: currentPage });
+                    }
+                    // Reset points to start new wall immediately
+                    setDrawingPoints([]);
+                    setStatusMessage('Wall created. Click start point for next wall, or Esc to stop.');
+                } else {
+                    // First point set
+                    setDrawingPoints(newPoints);
+                    setStatusMessage('Click the end point to finish this wall.');
+                }
                 break;
             case 'PLACING_START':
                 setPoints([normalizedPoint]); setMode('PLACING_END');
@@ -637,9 +645,9 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, project
         const rect = overlayRef.current.getBoundingClientRect();
         const currentPointRaw = { x: (e.clientX - rect.left) / zoom, y: (e.clientY - rect.top) / zoom };
         
-        if (mode === 'DRAWING_WALL' && drawingPoints.length > 0) {
+        if (mode === 'DRAWING_WALL' && drawingPoints.length === 1) {
             let currentPoint = { ...currentPointRaw };
-            const lastPoint = drawingPoints[drawingPoints.length - 1];
+            const lastPoint = drawingPoints[0]; // Start point is index 0
             let dx = currentPoint.x - lastPoint.x;
             let dy = currentPoint.y - lastPoint.y;
             
@@ -652,9 +660,6 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, project
             
             // 2. Length Snap: Snap to nearest inch if scale is available
             if (scaleRatio) {
-                // scaleRatio is inches per pixel
-                // wait, setScaleRatio(totalInches / normalizedDistance) -> Inches per Pixel
-                
                 let distPixels = Math.hypot(dx, dy);
                 let distInches = distPixels * scaleRatio;
                 const snappedInches = Math.round(distInches);
@@ -728,26 +733,12 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, project
     };
 
     const handleFinishDrawing = () => {
-        if (mode === 'DRAWING_WALL' && drawingPoints.length >= 2) {
-            const wallCount = projectWalls.length;
-            drawingPoints.forEach((point, i) => {
-                if (i < drawingPoints.length - 1) {
-                    const start = point;
-                    const end = drawingPoints[i + 1];
-                    const distance = Math.hypot(end.x - start.x, end.y - start.y);
-                    if (scaleRatio && distance > 0) {
-                        const lengthInInches = distance * scaleRatio;
-                        const name = `Measured Wall ${wallCount + i + 1}`;
-                        onAddWall(name, lengthInInches, { start, end, pageNum: currentPage });
-                    }
-                }
-            });
-            setStatusMessage(`Created ${drawingPoints.length - 1} walls. Ready for next task.`);
-        }
+        // Mode reset only, wall creation now happens on click
         setDrawingPoints([]);
         setMousePos(null);
         setMode('IDLE');
         setLiveLength(null);
+        setStatusMessage('Drawing mode exited.');
     };
 
     const handleCopySelection = () => {
@@ -846,8 +837,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, project
                 </div>
                 { mode === 'DRAWING_WALL' ? (
                      <div className="flex items-center gap-2">
-                        <button onClick={handleFinishDrawing} className="w-full px-3 py-2 bg-green-600 rounded-md hover:bg-green-700 text-sm font-semibold">Finish Drawing</button>
-                        <button onClick={handleCancelInteraction} className="w-full px-3 py-2 bg-slate-600 rounded-md hover:bg-slate-500 text-sm font-semibold">Cancel (Esc)</button>
+                        <button onClick={handleFinishDrawing} className="w-full px-3 py-2 bg-slate-600 rounded-md hover:bg-slate-500 text-sm font-semibold">Stop Drawing (Esc)</button>
                     </div>
                 ) : (
                     <div className="flex justify-between items-center">
