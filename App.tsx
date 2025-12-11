@@ -10,7 +10,8 @@ import { getProTip } from './services/geminiService';
 import { generateMaterialListPdf, generateMaterialReportPdf, drawWallOnCanvas } from './services/pdfService';
 import { generateSketchUpScript } from './services/sketchupService';
 import { generatePlyModel } from './services/exportService';
-import { PlusIcon, TrashIcon, EditIcon, DuplicateIcon, ProjectIcon, DownloadIcon, PdfIcon, CloseIcon, CubeIcon, MapPinIcon, DocumentReportIcon, AssemblyViewIcon, SketchupIcon, SaveIcon, LoadIcon, ChevronDownIcon, ChevronRightIcon, ArrowRightIcon, ArrowLeftIcon, GripVerticalIcon, SparklesIcon, FolderIcon, ClipboardCopyIcon, ClipboardPasteIcon } from './components/Icons';
+import { signInWithGoogle, signOut, onAuthStateChanged, type User } from './services/auth';
+import { PlusIcon, TrashIcon, EditIcon, DuplicateIcon, ProjectIcon, DownloadIcon, PdfIcon, CloseIcon, CubeIcon, MapPinIcon, DocumentReportIcon, AssemblyViewIcon, SketchupIcon, SaveIcon, LoadIcon, ChevronDownIcon, ChevronRightIcon, ArrowRightIcon, ArrowLeftIcon, GripVerticalIcon, SparklesIcon, FolderIcon, ClipboardCopyIcon, ClipboardPasteIcon, GoogleIcon, LogoutIcon } from './components/Icons';
 
 const generateId = () => `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -461,6 +462,9 @@ const App: React.FC = () => {
     const [materials, setMaterials] = useState<FramingMaterials | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     
+    // Auth State
+    const [user, setUser] = useState<User | null>(null);
+
     // Updated: Store PDF file per floor
     const [floorPdfs, setFloorPdfs] = useState<Record<string, File>>({});
     
@@ -500,6 +504,24 @@ const App: React.FC = () => {
     
     // Pop Out Window State
     const [isPdfDetached, setIsPdfDetached] = useState(false);
+
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged(setUser);
+        return () => unsubscribe();
+    }, []);
+
+    const handleGoogleSignIn = async () => {
+        try {
+            await signInWithGoogle();
+        } catch (error) {
+            console.error(error);
+            alert("Login Failed. See console for details.");
+        }
+    };
+
+    const handleSignOut = async () => {
+        await signOut();
+    };
 
     const getDescendantIds = useCallback((parentId: string): string[] => findDescendantIds(parentId, walls), [walls]);
     
@@ -1623,6 +1645,23 @@ const App: React.FC = () => {
                                 <button onClick={handleExportPly} disabled={walls.length === 0} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition disabled:bg-slate-600 disabled:cursor-not-allowed" title="Export for Web Viewer (3dviewer.net)">
                                     <CubeIcon className="w-5 h-5" /><span className="hidden sm:inline">Web 3D</span>
                                 </button>
+
+                                <div className="w-px h-8 bg-slate-700 mx-1"></div>
+                                
+                                {user ? (
+                                    <button onClick={handleSignOut} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 px-4 rounded-lg transition border border-slate-600" title={`Signed in as ${user.email}`}>
+                                        <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-xs font-bold overflow-hidden">
+                                            {user.photoURL ? <img src={user.photoURL} alt="User" className="w-full h-full object-cover" /> : (user.email ? user.email[0].toUpperCase() : 'U')}
+                                        </div>
+                                        <span className="hidden md:inline text-xs">{user.displayName || user.email?.split('@')[0]}</span>
+                                        <LogoutIcon className="w-4 h-4 text-slate-400" />
+                                    </button>
+                                ) : (
+                                    <button onClick={handleGoogleSignIn} className="flex items-center gap-2 bg-white text-slate-800 font-semibold py-2 px-4 rounded-lg transition hover:bg-slate-200">
+                                        <GoogleIcon className="w-5 h-5 text-red-500" />
+                                        <span className="hidden md:inline">Login</span>
+                                    </button>
+                                )}
                             </div>
                         </div>
                     </header>
