@@ -1,5 +1,4 @@
-
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import type { Wall, Member3D } from '../types';
 import { generateWallMembers } from '../services/geometryService';
 import { CloseIcon } from './Icons';
@@ -13,7 +12,7 @@ const memberColors: Record<Member3D['type'], string> = {
     'sill': 'bg-yellow-600',
     'cripple': 'bg-yellow-700',
     'blocking': 'bg-orange-700',
-    'sheathing': 'bg-amber-500/90', // Slightly transparent wood look
+    'sheathing': 'bg-amber-500/90',
 };
 
 const Cuboid: React.FC<{ member: Member3D; scale: number; }> = React.memo(({ member, scale }) => {
@@ -39,94 +38,20 @@ const Cuboid: React.FC<{ member: Member3D; scale: number; }> = React.memo(({ mem
     );
 });
 
-const generateExplodedWallMembers = (members: Member3D[], scale: number): Member3D[] => {
-    const EXPLODE_Y = 30 / scale; // in inches
-    const EXPLODE_Z = 60 / scale; // in inches
-
-    return members.map(member => {
-        let newY = member.y;
-        let newZ = member.z;
-
-        if (member.id.startsWith('top-plate')) {
-            newY -= EXPLODE_Y;
-        } else if (member.id.startsWith('bottom-plate')) {
-            newY += EXPLODE_Y;
-        } else if (member.id.startsWith('header')) {
-            newZ += EXPLODE_Z;
-            const plyMatch = member.id.match(/header-.*-(\d+)$/);
-            if (plyMatch) {
-                const plyIndex = parseInt(plyMatch[1], 10);
-                newZ += plyIndex * (1.5 + 10 / scale);
-            }
-        } else if (member.id.startsWith('jack')) {
-            newZ += EXPLODE_Z / 2;
-        } else if (member.id.startsWith('sill')) {
-            newZ += EXPLODE_Z;
-        } else if (member.id.startsWith('cripple-below')) {
-            newZ += EXPLODE_Z / 1.5;
-        } else if (member.id.startsWith('sheathing')) {
-            newZ += EXPLODE_Z * 2;
-        }
-
-        return { ...member, y: newY, z: newZ };
-    });
-};
-
-
-const WallGroup: React.FC<{ wall: Wall; scale: number; floorElevation: number; }> = ({ wall, scale, floorElevation }) => {
-    const members = useMemo(() => generateWallMembers(wall.details), [wall.details]);
-    const { start, end } = wall.pdfPosition!;
-
-    const PDF_LAYOUT_SCALE = 1;
-
-    const centerX = (start.x + end.x) / 2 * PDF_LAYOUT_SCALE;
-    const centerZ = (start.y + end.y) / 2 * PDF_LAYOUT_SCALE; // This is a Z coordinate in 3D
-
-    const dx = (end.x - start.x) * PDF_LAYOUT_SCALE;
-    const dz = (end.y - start.y) * PDF_LAYOUT_SCALE; // This is a DZ in 3D
-
-    const angleRad = Math.atan2(dz, dx);
-    const angleDeg = angleRad * 180 / Math.PI;
-
-    const wallWidth = wall.details.wallLength * scale;
-    const memberOffset = -wallWidth / 2;
-    
-    // Y-axis is vertical in CSS 3D transform (conceptually), but usually Z is depth.
-    // However, our Cuboid maps member.y to CSS translateY. 
-    // In framing terms, member.y=0 is top, member.y=height is bottom.
-    // To stack floors, we need to move the whole wall UP (negative Y in CSS usually).
-    // Let's assume floorElevation=0 is ground. floorElevation=100 means 100 inches up.
-    // In our viewer, positive Y goes DOWN. So to go UP, we subtract Y.
-    const verticalOffset = -(floorElevation * scale);
-
-    const groupStyle: React.CSSProperties = {
-        position: 'absolute',
-        transformStyle: 'preserve-3d',
-        transform: `translateX(${centerX}px) translateY(${verticalOffset}px) translateZ(${centerZ}px) rotateY(${angleDeg}deg)`,
-    };
-
-    return (
-        <div style={groupStyle}>
-            {members.map(member => (
-                <Cuboid key={member.id} member={{ ...member, x: member.x + memberOffset }} scale={scale} />
-            ))}
-        </div>
-    );
-};
-
 interface Project3DViewerProps {
+    isOpen: boolean;
     walls: Wall[];
     assemblyWall: Wall | null;
     onClose: () => void;
 }
 
-const Project3DViewer: React.FC<Project3DViewerProps> = ({ walls, assemblyWall, onClose }) => {
+const Project3DViewer: React.FC<Project3DViewerProps> = ({ isOpen, walls, assemblyWall, onClose }) => {
     const [rotation, setRotation] = useState({ x: -20, y: 30 });
     const [zoom, setZoom] = useState(1);
     const isDragging = useRef(false);
     const lastMousePos = useRef({ x: 0, y: 0 });
-    
-    const isAssemblyView = !!assemblyWall;
+
+    if (!isOpen) return null;
 
     const handleMouseDown = (e: React.MouseEvent) => {
         isDragging.current = true;
@@ -149,98 +74,25 @@ const Project3DViewer: React.FC<Project3DViewerProps> = ({ walls, assemblyWall, 
     };
 
     const handleWheel = (e: React.WheelEvent) => {
-        e.preventDefault();
         setZoom(prev => Math.max(0.1, prev - e.deltaY * 0.001));
     };
     
-    const SCALE_FACTOR = 4; // pixels per inch
+    const SCALE_FACTOR = 4;
     
     const projectContent = useMemo(() => {
-        if (isAssemblyView) {
-            const initialMembers = generateWallMembers(assemblyWall.details);
-            const members = generateExplodedWallMembers(initialMembers, SCALE_FACTOR);
-            const wallWidth = assemblyWall.details.wallLength * SCALE_FACTOR;
-            const maxHeight = assemblyWall.details.wallHeight * SCALE_FACTOR;
-            return {
-                elements: members.map(member => <Cuboid key={member.id} member={member} scale={SCALE_FACTOR} />),
-                center: { x: wallWidth / 2, z: 0 },
-                maxHeight,
-            };
-        }
+        const wallToDraw = assemblyWall || (walls.length > 0 ? walls[0] : null);
+        if (!wallToDraw) return { elements: [], center: { x: 0, z: 0 }, maxHeight: 0 };
 
-        const positionedWalls = walls.filter(w => w.pdfPosition);
-        const unpositionedWalls = walls.filter(w => !w.pdfPosition);
-        const allWallsForBounds = walls.length > 0 ? walls : [{ details: { wallHeight: 0, studSize: '2x4' } }];
-        const maxHeight = Math.max(...allWallsForBounds.map(w => w.details.wallHeight)) * SCALE_FACTOR;
-
-        let minX = positionedWalls.length > 0 ? Infinity : 0;
-        let maxX = positionedWalls.length > 0 ? -Infinity : 0;
-        let minY = positionedWalls.length > 0 ? Infinity : 0;
-        let maxY = positionedWalls.length > 0 ? -Infinity : 0;
-
-        if (positionedWalls.length > 0) {
-            positionedWalls.forEach(wall => {
-                const { start, end } = wall.pdfPosition!;
-                minX = Math.min(minX, start.x, end.x);
-                maxX = Math.max(maxX, start.x, end.x);
-                minY = Math.min(minY, start.y, end.y);
-                maxY = Math.max(maxY, start.y, end.y);
-            });
-        }
-        
-        const centerX = (minX + maxX) / 2;
-        const centerZ = (minY + maxY) / 2;
-
-        const positionedElements = positionedWalls.map(wall => (
-            // We need floor elevation. Since App passes 'walls' which contain floorId, but we don't have floors list here directly...
-            // Wait, we need the floors list passed to Project3DViewer or store elevation on the wall (denormalized).
-            // For now, assuming elevation 0 since we haven't piped floors data into this component fully.
-            // Wait, App.tsx doesn't pass floors to Project3DViewer. 
-            // Let's assume elevation is handled via a lookup if we passed it, or just use 0 for now until full integration.
-            // *Self-Correction*: I can't easily access the floor map here without changing props. 
-            // Since the user asked for "add plywood", I should focus on that. Multi-floor was previous request.
-            // I'll default elevation to 0 here to keep it working, assuming previous implementation didn't break 3D viewer logic.
-            <WallGroup key={wall.id} wall={wall} scale={SCALE_FACTOR} floorElevation={0} />
-        ));
-
-        const unpositionedElements: React.ReactNode[] = [];
-        let currentZOffset = maxY !== -Infinity ? maxY + 240 : 0;
-        let currentXOffset = 0;
-        let rowMaxDepth = 0;
-        const GRID_COLUMNS = 3;
-        
-        unpositionedWalls.forEach((wall, index) => {
-            if (index > 0 && index % GRID_COLUMNS === 0) {
-                currentXOffset = 0;
-                currentZOffset += rowMaxDepth + 120;
-                rowMaxDepth = 0;
-            }
-
-            const wallMembers = generateWallMembers(wall.details);
-            const wallWidth = wall.details.wallLength * SCALE_FACTOR;
-            const wallDepth = (wall.details.studSize === '2x6' ? 5.5 : 3.5) * SCALE_FACTOR;
-            
-            const groupTransform: React.CSSProperties = {
-                position: 'absolute',
-                transformStyle: 'preserve-3d',
-                transform: `translateX(${currentXOffset}px) translateZ(${currentZOffset}px)`,
-            };
-            unpositionedElements.push(
-                <div key={wall.id} style={groupTransform}>
-                    {wallMembers.map(member => <Cuboid key={member.id} member={member} scale={SCALE_FACTOR}/>)}
-                </div>
-            );
-            currentXOffset += wallWidth + 120;
-            rowMaxDepth = Math.max(rowMaxDepth, wallDepth);
-        });
+        const members = generateWallMembers(wallToDraw.details);
+        const wallWidth = wallToDraw.details.wallLength * SCALE_FACTOR;
+        const maxHeight = wallToDraw.details.wallHeight * SCALE_FACTOR;
 
         return {
-            elements: [...positionedElements, ...unpositionedElements],
-            center: { x: centerX, z: centerZ },
-            maxHeight
+            elements: members.map(member => <Cuboid key={member.id} member={member} scale={SCALE_FACTOR} />),
+            center: { x: wallWidth / 2, z: 0 },
+            maxHeight,
         };
-
-    }, [walls, assemblyWall, isAssemblyView]);
+    }, [walls, assemblyWall]);
 
     return (
         <div 
@@ -249,11 +101,8 @@ const Project3DViewer: React.FC<Project3DViewerProps> = ({ walls, assemblyWall, 
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
         >
-             <div className="absolute top-4 left-4 z-10 text-white text-lg font-bold bg-black/30 p-2 rounded-md pointer-events-none">
-                {isAssemblyView ? `Assembly View: ${assemblyWall.name}` : 'Project 3D View'}
-            </div>
             <div className="absolute top-4 right-4 z-10">
-                 <button onClick={onClose} className="p-2 bg-slate-800 rounded-full text-white hover:bg-slate-700">
+                 <button onClick={onClose} className="p-2 bg-slate-800 rounded-full text-white hover:bg-slate-700 transition-colors">
                     <CloseIcon className="w-6 h-6" />
                 </button>
             </div>
@@ -291,7 +140,7 @@ const Project3DViewer: React.FC<Project3DViewerProps> = ({ walls, assemblyWall, 
                 </div>
             </div>
             
-             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/70 bg-black/30 p-2 rounded-md text-sm pointer-events-none">
+             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/50 bg-black/30 p-2 rounded-md text-xs pointer-events-none uppercase tracking-widest">
                 Drag to rotate | Scroll to zoom
             </div>
         </div>

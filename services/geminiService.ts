@@ -1,19 +1,9 @@
 
 import { GoogleGenAI } from "@google/genai";
 import type { Wall, Opening } from '../types';
-import { GEMINI_API_KEY } from '../config';
 
-// Declare process to satisfy TypeScript in browser environments where types/node might be missing
-declare const process: any;
-
-// Vite exposes env variables via import.meta.env. VITE_ prefix is required for client-side exposure.
-// We fallback to process.env for local Node/compatible environments, safely checking if process exists.
-// Finally, we check the local config.ts file.
-const viteEnv = (import.meta as any).env;
-const processEnv = typeof process !== 'undefined' ? process.env : {};
-const apiKey = viteEnv?.VITE_API_KEY || processEnv?.API_KEY || GEMINI_API_KEY;
-
-const ai = new GoogleGenAI({ apiKey: apiKey as string });
+// The Google GenAI SDK is initialized using the API key from the environment.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 function formatOpeningsForPrompt(openings: Opening[], type: string): string {
     if (openings.length === 0 || openings.every(o => o.quantity === 0)) {
@@ -48,11 +38,12 @@ export async function getProTip(walls: Wall[]): Promise<string> {
   `;
 
   try {
+    // Basic summarization/advice task uses gemini-3-flash-preview
     const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3-flash-preview',
         contents: summary,
     });
-    return response.text as string;
+    return response.text || "Could not generate a pro tip.";
   } catch (error) {
     console.error("Error fetching pro tip from Gemini:", error);
     return "Could not retrieve a pro tip at this time. Please check your API key and connection.";
