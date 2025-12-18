@@ -11,8 +11,19 @@ import { getProTip } from './services/geminiService';
 import { generateMaterialListPdf, generateMaterialReportPdf, drawWallOnCanvas } from './services/pdfService';
 import { generateSketchUpScript } from './services/sketchupService';
 import { generatePlyModel } from './services/exportService';
-import { signInWithGoogle, signOut, onAuthStateChanged, type User } from './services/auth';
-import { PlusIcon, TrashIcon, EditIcon, DuplicateIcon, ProjectIcon, DownloadIcon, PdfIcon, CloseIcon, CubeIcon, MapPinIcon, DocumentReportIcon, AssemblyViewIcon, SketchupIcon, SaveIcon, LoadIcon, ChevronDownIcon, ChevronRightIcon, ArrowRightIcon, ArrowLeftIcon, GripVerticalIcon, SparklesIcon, FolderIcon, ClipboardCopyIcon, ClipboardPasteIcon, GoogleIcon, LogoutIcon } from './components/Icons';
+import { 
+    signInWithGoogle, 
+    signOut, 
+    onAuthStateChanged, 
+    getUserProfile, 
+    createUserProfile, 
+    getPendingUsers, 
+    updateUserStatus,
+    type User, 
+    type UserProfile 
+} from './services/auth';
+import { ADMIN_EMAILS } from './config';
+import { PlusIcon, TrashIcon, EditIcon, DuplicateIcon, ProjectIcon, DownloadIcon, PdfIcon, CloseIcon, CubeIcon, MapPinIcon, DocumentReportIcon, AssemblyViewIcon, SketchupIcon, SaveIcon, LoadIcon, ChevronDownIcon, ChevronRightIcon, ArrowRightIcon, ArrowLeftIcon, GripVerticalIcon, SparklesIcon, FolderIcon, ClipboardCopyIcon, ClipboardPasteIcon, GoogleIcon, LogoutIcon, RulerIcon } from './components/Icons';
 
 const generateId = () => `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -65,6 +76,127 @@ const formatHeight = (inches: number) => {
     if (Math.abs(inches - 109.125) < 0.01) return "9' 1 1/8\"";
     return formatLengthFeetInches(inches);
 };
+
+// --- Components ---
+
+const AdminUserModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+}> = ({ isOpen, onClose }) => {
+    const [pendingUsers, setPendingUsers] = useState<UserProfile[]>([]);
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        if (isOpen) {
+            loadPendingUsers();
+        }
+    }, [isOpen]);
+
+    const loadPendingUsers = async () => {
+        setLoading(true);
+        const users = await getPendingUsers();
+        setPendingUsers(users);
+        setLoading(false);
+    };
+
+    const handleAction = async (uid: string, status: 'approved' | 'rejected') => {
+        await updateUserStatus(uid, status);
+        await loadPendingUsers();
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm" onClick={onClose}>
+            <div className="bg-slate-800 rounded-lg shadow-2xl p-6 w-full max-w-2xl m-4 border border-slate-700" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-2xl font-bold text-white">Pending Approvals</h2>
+                    <button onClick={onClose}><CloseIcon className="w-5 h-5 text-slate-400 hover:text-white"/></button>
+                </div>
+                
+                {loading ? (
+                    <div className="text-center py-8 text-slate-400">Loading pending users...</div>
+                ) : pendingUsers.length === 0 ? (
+                    <div className="text-center py-8 bg-slate-900/50 rounded-lg border border-slate-700 border-dashed text-slate-400">
+                        No pending users found.
+                    </div>
+                ) : (
+                    <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+                        {pendingUsers.map(user => (
+                            <div key={user.uid} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-slate-700/50 rounded-lg border border-slate-600 gap-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-full bg-slate-600 overflow-hidden">
+                                        {user.photoURL ? <img src={user.photoURL} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-400 font-bold">{user.displayName?.[0]}</div>}
+                                    </div>
+                                    <div>
+                                        <div className="font-semibold text-white">{user.displayName}</div>
+                                        <div className="text-sm text-slate-400">{user.email}</div>
+                                    </div>
+                                </div>
+                                <div className="flex gap-2 w-full sm:w-auto">
+                                    <button 
+                                        onClick={() => handleAction(user.uid, 'approved')}
+                                        className="flex-1 sm:flex-none px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-medium transition"
+                                    >
+                                        Approve
+                                    </button>
+                                    <button 
+                                        onClick={() => handleAction(user.uid, 'rejected')}
+                                        className="flex-1 sm:flex-none px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-medium transition"
+                                    >
+                                        Reject
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+const PendingApprovalScreen: React.FC<{ onSignOut: () => void }> = ({ onSignOut }) => (
+    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
+        <div className="max-w-md w-full bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700 text-center">
+            <div className="w-16 h-16 bg-yellow-500/20 text-yellow-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-8 h-8">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">Approval Pending</h2>
+            <p className="text-slate-400 mb-8">
+                Your account has been created and is waiting for administrator approval. You will gain access once an admin approves your request.
+            </p>
+            <button 
+                onClick={onSignOut}
+                className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white font-semibold rounded-lg transition"
+            >
+                Sign Out
+            </button>
+        </div>
+    </div>
+);
+
+const RejectedScreen: React.FC<{ onSignOut: () => void }> = ({ onSignOut }) => (
+    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
+        <div className="max-w-md w-full bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700 text-center">
+            <div className="w-16 h-16 bg-red-500/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                <CloseIcon className="w-8 h-8" />
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">Access Denied</h2>
+            <p className="text-slate-400 mb-8">
+                Your account request has been declined by an administrator. Please contact support if you believe this is an error.
+            </p>
+            <button 
+                onClick={onSignOut}
+                className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white font-semibold rounded-lg transition"
+            >
+                Sign Out
+            </button>
+        </div>
+    </div>
+);
 
 const AddWallModal: React.FC<{
     isOpen: boolean;
@@ -139,6 +271,7 @@ const AddWallModal: React.FC<{
     );
 };
 
+// ... (Rest of existing data helper functions: dataURLtoFile, fileToDataUrl)
 const dataURLtoFile = (dataurl: string, filename: string): File => {
     const arr = dataurl.split(',');
     const mimeMatch = arr[0].match(/:(.*?);/);
@@ -235,47 +368,58 @@ const FloorManagerModal: React.FC<{
                 
                 <div className="space-y-2 mb-6 max-h-60 overflow-y-auto">
                     {floors.map(floor => (
-                        <div key={floor.id} className={`flex justify-between items-center p-3 rounded border ${floor.id === activeFloorId ? 'bg-indigo-900/40 border-indigo-500' : 'bg-slate-700 border-slate-600'}`}>
-                            <div className="flex-1 mr-4">
-                                <input 
-                                    type="text" 
-                                    className="bg-transparent border-b border-transparent hover:border-slate-500 focus:border-indigo-500 font-semibold w-full outline-none"
-                                    value={floor.name}
-                                    onChange={(e) => onUpdateFloor(floor.id, { name: e.target.value })}
-                                />
-                                <div className="flex items-center gap-1 mt-1">
-                                    <span className="text-xs text-slate-400">Elev:</span>
+                        <div key={floor.id} className={`flex flex-col p-3 rounded border ${floor.id === activeFloorId ? 'bg-indigo-900/40 border-indigo-500' : 'bg-slate-700 border-slate-600'}`}>
+                            <div className="flex justify-between items-center">
+                                <div className="flex-1 mr-4">
                                     <input 
-                                        type="number"
-                                        className="w-16 bg-slate-900 border border-slate-600 rounded px-1 py-0.5 text-xs text-white"
-                                        value={floor.elevation}
-                                        onChange={(e) => onUpdateFloor(floor.id, { elevation: parseFloat(e.target.value) || 0 })}
+                                        type="text" 
+                                        className="bg-transparent border-b border-transparent hover:border-slate-500 focus:border-indigo-500 font-semibold w-full outline-none"
+                                        value={floor.name}
+                                        onChange={(e) => onUpdateFloor(floor.id, { name: e.target.value })}
                                     />
-                                    <span className="text-xs text-slate-400">in</span>
+                                    <div className="flex items-center gap-1 mt-1">
+                                        <span className="text-xs text-slate-400">Elev:</span>
+                                        <input 
+                                            type="number"
+                                            className="w-16 bg-slate-900 border border-slate-600 rounded px-1 py-0.5 text-xs text-white"
+                                            value={floor.elevation}
+                                            onChange={(e) => onUpdateFloor(floor.id, { elevation: parseFloat(e.target.value) || 0 })}
+                                        />
+                                        <span className="text-xs text-slate-400">in</span>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <div className="text-xs text-slate-400 flex flex-col items-end">
+                                        <div className="flex items-center gap-1 mb-1">
+                                            <span>PDF Page:</span>
+                                            <button 
+                                                onClick={() => onUpdateFloor(floor.id, { pdfPage: currentPage })}
+                                                className="p-1 hover:bg-slate-600 rounded text-indigo-400"
+                                                title="Use Current Page"
+                                            >
+                                                <MapPinIcon className="w-3 h-3" />
+                                            </button>
+                                        </div>
+                                        <input 
+                                            type="number" 
+                                            className="w-12 bg-slate-900 border border-slate-600 rounded px-1 py-0.5 text-right text-white"
+                                            value={floor.pdfPage || ''}
+                                            placeholder="-"
+                                            onChange={(e) => onUpdateFloor(floor.id, { pdfPage: parseInt(e.target.value) || undefined })}
+                                        />
+                                    </div>
+                                    {floor.id !== activeFloorId && <button onClick={() => onSetActiveFloor(floor.id)} className="px-2 py-1 text-xs bg-slate-600 hover:bg-indigo-600 rounded">Select</button>}
+                                    {floors.length > 1 && <button onClick={() => onDeleteFloor(floor.id)} className="p-1 text-red-400 hover:text-red-300"><TrashIcon className="w-4 h-4"/></button>}
                                 </div>
                             </div>
-                            <div className="flex items-center gap-3">
-                                <div className="text-xs text-slate-400 flex flex-col items-end">
-                                    <div className="flex items-center gap-1 mb-1">
-                                        <span>PDF Page:</span>
-                                        <button 
-                                            onClick={() => onUpdateFloor(floor.id, { pdfPage: currentPage })}
-                                            className="p-1 hover:bg-slate-600 rounded text-indigo-400"
-                                            title="Use Current Page"
-                                        >
-                                            <MapPinIcon className="w-3 h-3" />
-                                        </button>
-                                    </div>
-                                    <input 
-                                        type="number" 
-                                        className="w-12 bg-slate-900 border border-slate-600 rounded px-1 py-0.5 text-right text-white"
-                                        value={floor.pdfPage || ''}
-                                        placeholder="-"
-                                        onChange={(e) => onUpdateFloor(floor.id, { pdfPage: parseInt(e.target.value) || undefined })}
-                                    />
+                            <div className="mt-2 pt-2 border-t border-slate-600/50 flex items-center justify-between">
+                                <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                                    <RulerIcon className="w-3 h-3 text-indigo-400"/>
+                                    <span>Scale:</span>
+                                    <span className="font-mono text-indigo-300">
+                                        {floor.scale ? `1 unit = ${floor.scale.toFixed(3)}"` : 'Not set'}
+                                    </span>
                                 </div>
-                                {floor.id !== activeFloorId && <button onClick={() => onSetActiveFloor(floor.id)} className="px-2 py-1 text-xs bg-slate-600 hover:bg-indigo-600 rounded">Select</button>}
-                                {floors.length > 1 && <button onClick={() => onDeleteFloor(floor.id)} className="p-1 text-red-400 hover:text-red-300"><TrashIcon className="w-4 h-4"/></button>}
                             </div>
                         </div>
                     ))}
@@ -466,8 +610,8 @@ interface WallRowProps {
     wallsByFloor: Record<string, { wall: Wall; level: number }[]>;
     hasActivePdf: boolean;
     getDescendantIds: (parentId: string) => string[];
-    onToggleSelection: (id: string) => void;
-    onWallClick: (id: string) => void;
+    onToggleSelection: (id: string, shiftKey: boolean) => void;
+    onWallClick: (id: string, e: React.MouseEvent) => void;
     onUpdateFloor: (wallId: string, floorId: string) => void;
     onCopyProperties: (wall: Wall) => void;
     toggleParent: (parentId: string) => void;
@@ -563,7 +707,7 @@ const WallRow: React.FC<WallRowProps> = ({
             onDrop={handleDrop}
             onDragEnd={handleDragEnd}
             className={`transition-colors border-b border-slate-700/50 ${borderClass} ${isBeingDragged ? 'opacity-40' : ''} cursor-pointer`}
-            onClick={() => onWallClick(wall.id)}
+            onClick={(e) => onWallClick(wall.id, e)}
             onMouseEnter={() => setHighlightedWallId(wall.id)}
             onMouseLeave={() => setHighlightedWallId(null)}
         >
@@ -573,7 +717,12 @@ const WallRow: React.FC<WallRowProps> = ({
                     className="h-4 w-4 rounded bg-slate-700 border-slate-600 text-indigo-500 focus:ring-indigo-600 cursor-pointer"
                     checked={isSelected}
                     ref={el => { if (el) el.indeterminate = isIndeterminate; }}
-                    onChange={() => onToggleSelection(wall.id)}
+                    onClick={(e) => {
+                        // Crucial: Use onClick on the input itself to catch the shiftKey during toggle
+                        e.stopPropagation();
+                        onToggleSelection(wall.id, e.shiftKey);
+                    }}
+                    onChange={() => {}} // Stub to avoid read-only warning, logic is in onClick
                 />
             </td>
             <td className="p-3">
@@ -644,6 +793,8 @@ const WallRow: React.FC<WallRowProps> = ({
     );
 };
 
+// --- App Component ---
+
 const App: React.FC = () => {
     const [walls, setWalls] = useState<Wall[]>([]);
     const [floors, setFloors] = useState<Floor[]>([{ id: 'floor-1', name: '1st Floor', elevation: 0 }]);
@@ -656,7 +807,12 @@ const App: React.FC = () => {
     // Auth State
     const [user, setUser] = useState<User | null>(null);
     const [isAuthLoading, setIsAuthLoading] = useState(true);
-
+    const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+    const [isProfileLoading, setIsProfileLoading] = useState(false);
+    
+    // Admin State
+    const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+    
     // Updated: Store PDF file per floor
     const [floorPdfs, setFloorPdfs] = useState<Record<string, File>>({});
     
@@ -675,13 +831,11 @@ const App: React.FC = () => {
     const [isPdfOptionsModalOpen, setIsPdfOptionsModalOpen] = useState(false);
     const [collapsedParents, setCollapsedParents] = useState<Record<string, boolean>>({});
     const [selectedWallIds, setSelectedWallIds] = useState<Set<string>>(new Set());
+    const [lastInteractedWallId, setLastInteractedWallId] = useState<string | null>(null);
     
     // PDF Viewer specific states
     const [selectedPdfWallIds, setSelectedPdfWallIds] = useState<Set<string>>(new Set());
     const [copiedLayout, setCopiedLayout] = useState<{ walls: Wall[], anchor: Point } | null>(null);
-    
-    // Scale per page
-    const [pdfScales, setPdfScales] = useState<Record<number, number>>({});
     
     // Collapsed Floors state
     const [collapsedFloors, setCollapsedFloors] = useState<Record<string, boolean>>({});
@@ -698,12 +852,33 @@ const App: React.FC = () => {
     const [isPdfDetached, setIsPdfDetached] = useState(false);
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged((user) => {
-            setUser(user);
+        const unsubscribe = onAuthStateChanged(async (currentUser) => {
+            setUser(currentUser);
+            if (currentUser) {
+                setIsProfileLoading(true);
+                // 1. Get existing profile
+                let profile = await getUserProfile(currentUser.uid);
+                
+                // 2. If no profile exists, create one (status: pending)
+                if (!profile) {
+                    profile = await createUserProfile(currentUser);
+                }
+                
+                // 3. Set profile state
+                setUserProfile(profile);
+                setIsProfileLoading(false);
+            } else {
+                setUserProfile(null);
+            }
             setIsAuthLoading(false);
         });
         return () => unsubscribe();
     }, []);
+
+    const isAdmin = useMemo(() => {
+        if (!user || !user.email) return false;
+        return ADMIN_EMAILS.includes(user.email);
+    }, [user]);
 
     const handleGoogleSignIn = async () => {
         try {
@@ -735,10 +910,81 @@ const App: React.FC = () => {
         }
         return ancestors;
     }, [walls]);
+
+    // Prepare wall data grouped by floors for the "Roll up" view
+    const wallsByFloor = useMemo(() => {
+        const flatListsByFloor: Record<string, { wall: Wall; level: number }[]> = {};
+
+        floors.forEach(floor => {
+             // Get walls for this floor
+             const floorWalls = walls.filter(w => w.floorId === floor.id || (!w.floorId && floor.id === floors[0].id));
+             
+             // Build tree for this floor specifically
+             const floorWallMap = new Map<string, { wall: Wall; children: any[] }>();
+             floorWalls.forEach(w => floorWallMap.set(w.id, { wall: w, children: [] }));
+             
+             const roots: any[] = [];
+             floorWalls.forEach(w => {
+                 const node = floorWallMap.get(w.id)!;
+                 // Only treat as child if parent is ALSO on this floor
+                 if (w.parentId && floorWallMap.has(w.parentId)) {
+                     floorWallMap.get(w.parentId)!.children.push(node);
+                 } else {
+                     roots.push(node);
+                 }
+             });
+
+             const flatList: { wall: Wall; level: number }[] = [];
+             const traverse = (nodes: any[], level: number) => {
+                 nodes.forEach(node => {
+                     flatList.push({ wall: node.wall, level });
+                     if (!collapsedParents[node.wall.id]) {
+                         traverse(node.children, level + 1);
+                     }
+                 });
+             };
+             traverse(roots, 0);
+             flatListsByFloor[floor.id] = flatList;
+        });
+        
+        return flatListsByFloor;
+
+    }, [walls, floors, collapsedParents]);
+
+    // Get flat list of visible wall IDs for range selection
+    const visibleWallIds = useMemo(() => {
+        return floors.flatMap(f => {
+            if (collapsedFloors[f.id]) return [];
+            return (wallsByFloor[f.id] || []).map(item => item.wall.id);
+        });
+    }, [floors, collapsedFloors, wallsByFloor]);
     
-    const handleToggleWallSelection = useCallback((wallId: string) => {
+    const handleToggleWallSelection = useCallback((wallId: string, shiftKey: boolean) => {
         setSelectedWallIds(prevSelected => {
             const newSelection = new Set(prevSelected);
+            
+            if (shiftKey && lastInteractedWallId) {
+                const startIndex = visibleWallIds.indexOf(lastInteractedWallId);
+                const endIndex = visibleWallIds.indexOf(wallId);
+                
+                if (startIndex !== -1 && endIndex !== -1) {
+                    const start = Math.min(startIndex, endIndex);
+                    const end = Math.max(startIndex, endIndex);
+                    const rangeIds = visibleWallIds.slice(start, end + 1);
+                    
+                    // Determine new state based on current anchor item
+                    // If you shift-click to a range, usually all items become the state of the first item you selected
+                    const newState = !newSelection.has(wallId); // Simple toggle logic for range target
+
+                    rangeIds.forEach(id => {
+                        if (newState) newSelection.add(id);
+                        else newSelection.delete(id);
+                    });
+                    return newSelection;
+                }
+            } 
+            
+            // Standard single toggle logic
             const isCurrentlySelected = newSelection.has(wallId);
             const descendantIds = getDescendantIds(wallId);
     
@@ -751,20 +997,12 @@ const App: React.FC = () => {
                 newSelection.add(wallId);
                 descendantIds.forEach(id => newSelection.add(id));
             }
+            
             return newSelection;
         });
-    }, [getDescendantIds, getAncestorIds]);
-    
-    const areAllSelected = walls.length > 0 && selectedWallIds.size === walls.length;
-    const isPartiallySelected = selectedWallIds.size > 0 && !areAllSelected;
-
-    const handleSelectAllToggle = () => {
-        if (areAllSelected) {
-            setSelectedWallIds(new Set());
-        } else {
-            setSelectedWallIds(new Set(walls.map(w => w.id)));
-        }
-    };
+        // Always update anchor point on interaction
+        setLastInteractedWallId(wallId);
+    }, [getDescendantIds, getAncestorIds, lastInteractedWallId, visibleWallIds]);
 
     const handleApplyBulkEdit = (changes: { studSize?: StudSize; headerSize?: HeaderSize; headerPly?: 2 | 3; studsOnCenter?: 1 | 2 | 3 | 4; blockingRows?: number; sheathing?: boolean; floorId?: string }) => {
         setWalls(prevWalls => 
@@ -1165,7 +1403,7 @@ const App: React.FC = () => {
                 pdfsData[fid] = { name: file.name, dataUrl: await fileToDataUrl(file) };
             }
 
-            const projectData = JSON.stringify({ walls, floors, pdfsData, pdfScales }, null, 2);
+            const projectData = JSON.stringify({ walls, floors, pdfsData }, null, 2);
             const blob = new Blob([projectData], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -1207,10 +1445,10 @@ const App: React.FC = () => {
         setCopiedLayout(null);
         setDraggedId(null);
         setDragOverState(null);
-        setPdfScales({});
         setCollapsedFloors({});
         setPropertyClipboard(null);
         setIsPdfDetached(false);
+        setLastInteractedWallId(null);
     };
 
     const handleCloseProject = () => {
@@ -1253,16 +1491,20 @@ const App: React.FC = () => {
                     floorId: w.floorId || primaryFloorId
                 }));
                 
+                // Migrate legacy scales if present
+                if (projectData.pdfScales) {
+                    loadedFloors = loadedFloors.map(f => {
+                         if (f.pdfPage && projectData.pdfScales?.[f.pdfPage]) {
+                             return { ...f, scale: projectData.pdfScales[f.pdfPage] };
+                         }
+                         return f;
+                    });
+                }
+                
                 setWalls(migratedWalls);
                 setFloors(loadedFloors);
                 setActiveFloorId(primaryFloorId);
                 
-                if (projectData.pdfScales) {
-                    setPdfScales(projectData.pdfScales);
-                } else {
-                    setPdfScales({});
-                }
-
                 if (projectData.pdfData && projectData.pdfData.dataUrl) {
                     // Legacy single PDF support
                     const newPdfFile = dataURLtoFile(projectData.pdfData.dataUrl, projectData.pdfData.name);
@@ -1292,6 +1534,7 @@ const App: React.FC = () => {
                 setCollapsedFloors({});
                 setPropertyClipboard(null);
                 setIsPdfDetached(false);
+                setLastInteractedWallId(null);
                 
             } catch (error) {
                 console.error("Failed to load project:", error);
@@ -1307,17 +1550,48 @@ const App: React.FC = () => {
         fileInputRef.current?.click();
     };
     
-    const handleSetClickedWall = (wallId: string | null) => {
-        const newClickedId = clickedWallId === wallId ? null : wallId;
-        setClickedWallId(newClickedId);
+    const handleSetClickedWall = (wallId: string | null, e?: React.MouseEvent) => {
+        const isMultiSelect = e?.ctrlKey || e?.metaKey;
+        const isRangeSelect = e?.shiftKey;
 
-        if (newClickedId) {
-            const wall = walls.find(w => w.id === newClickedId);
+        // Selection Logic via Row Click
+        if (wallId) {
+            if (isRangeSelect && lastInteractedWallId) {
+                const startIndex = visibleWallIds.indexOf(lastInteractedWallId);
+                const endIndex = visibleWallIds.indexOf(wallId);
+                if (startIndex !== -1 && endIndex !== -1) {
+                    const start = Math.min(startIndex, endIndex);
+                    const end = Math.max(startIndex, endIndex);
+                    const rangeIds = visibleWallIds.slice(start, end + 1);
+                    setSelectedWallIds(prev => {
+                        const next = new Set(prev);
+                        rangeIds.forEach(id => next.add(id));
+                        return next;
+                    });
+                }
+            } else if (isMultiSelect) {
+                handleToggleWallSelection(wallId, false);
+            } else {
+                // Focus Logic (Highlight on PDF)
+                const newClickedId = clickedWallId === wallId ? null : wallId;
+                setClickedWallId(newClickedId);
+                
+                // Update anchor for next potential shift click
+                setLastInteractedWallId(wallId);
+                
+                // standard OS row click also selects the row
+                setSelectedWallIds(new Set([wallId]));
+            }
+        }
+
+        // Expanded logic for ensuring wall visibility
+        if (wallId) {
+            const wall = walls.find(w => w.id === wallId);
             if(wall && wall.floorId !== activeFloorId) {
                 setActiveFloorId(wall.floorId || floors[0].id);
             }
 
-            const ancestorIds = getAncestorIds(newClickedId);
+            const ancestorIds = getAncestorIds(wallId);
             if (ancestorIds.length > 0) {
                 setCollapsedParents(prev => {
                     const newCollapsed = { ...prev };
@@ -1329,7 +1603,7 @@ const App: React.FC = () => {
             }
             
             if (wall?.pdfPosition) {
-                setWallToFocusId(newClickedId);
+                setWallToFocusId(wallId);
             }
         }
     };
@@ -1388,63 +1662,13 @@ const App: React.FC = () => {
         }
     };
     
-    const handleSetScale = (pageNum: number, scale: number) => {
-        setPdfScales(prev => ({ ...prev, [pageNum]: scale }));
+    const handleSetScale = (scale: number) => {
+        setFloors(prev => prev.map(f => f.id === activeFloorId ? { ...f, scale } : f));
     };
 
     const handleTogglePdfDetach = () => {
         setIsPdfDetached(prev => !prev);
     };
-
-    // Prepare wall data grouped by floors for the "Roll up" view
-    const wallsByFloor = useMemo(() => {
-        const grouped: Record<string, { wall: Wall; children: any[] }[]> = {};
-        
-        // Initialize for all floors
-        floors.forEach(f => { grouped[f.id] = []; });
-        
-        // Create a map for all walls to handle parent/child relationships
-        const wallMap = new Map<string, { wall: Wall; children: any[] }>();
-        walls.forEach(w => wallMap.set(w.id, { wall: w, children: [] }));
-        
-        const flatListsByFloor: Record<string, { wall: Wall; level: number }[]> = {};
-
-        floors.forEach(floor => {
-             // Get walls for this floor
-             const floorWalls = walls.filter(w => w.floorId === floor.id || (!w.floorId && floor.id === floors[0].id));
-             
-             // Build tree for this floor specifically
-             const floorWallMap = new Map<string, { wall: Wall; children: any[] }>();
-             floorWalls.forEach(w => floorWallMap.set(w.id, { wall: w, children: [] }));
-             
-             const roots: any[] = [];
-             floorWalls.forEach(w => {
-                 const node = floorWallMap.get(w.id)!;
-                 // Only treat as child if parent is ALSO on this floor
-                 if (w.parentId && floorWallMap.has(w.parentId)) {
-                     floorWallMap.get(w.parentId)!.children.push(node);
-                 } else {
-                     roots.push(node);
-                 }
-             });
-
-             const flatList: { wall: Wall; level: number }[] = [];
-             const traverse = (nodes: any[], level: number) => {
-                 nodes.forEach(node => {
-                     flatList.push({ wall: node.wall, level });
-                     if (!collapsedParents[node.wall.id]) {
-                         traverse(node.children, level + 1);
-                     }
-                 });
-             };
-             traverse(roots, 0);
-             flatListsByFloor[floor.id] = flatList;
-        });
-        
-        return flatListsByFloor;
-
-    }, [walls, floors, collapsedParents]);
-
 
     const handleIndentWall = (wallId: string) => {
         // Logic needs to be aware of the floor context
@@ -1572,17 +1796,12 @@ const App: React.FC = () => {
         updatedWalls = updatedWalls.filter(w => !idsToMove.includes(w.id));
         
         // Adjust insertion index because removing items might have shifted indices
-        // We can't rely on simple index math if items were removed before the target.
-        // Re-find the insertion point in the cleaned array.
         if (position === 'on') {
-             // For 'on', we just append to children. Need to find where the parent (or its last child) is now.
-             // If parent was moved, this case is impossible (checked above).
              const targetDescendants = findDescendantIds(targetId, updatedWalls);
              const lastDescendantId = targetDescendants.length > 0 ? targetDescendants[targetDescendants.length - 1] : targetId;
              const idx = updatedWalls.findIndex(w => w.id === lastDescendantId);
              insertIndex = idx + 1;
         } else {
-             // Sibling move
              const tIdx = updatedWalls.findIndex(w => w.id === targetId);
              insertIndex = position === 'above' ? tIdx : tIdx + 1;
         }
@@ -1590,9 +1809,6 @@ const App: React.FC = () => {
         // Apply updates to moving items
         movingItems.forEach(item => {
             item.parentId = newParentId;
-            // Update floor to match target if simplified logic desires, or keep original?
-            // User requested "combine them into folders", implying grouping. 
-            // Usually grouping implies being on the same floor.
             item.floorId = targetItem.floorId || floors[0].id;
         });
 
@@ -1601,16 +1817,16 @@ const App: React.FC = () => {
 
         setWalls(updatedWalls);
         handleDragEnd();
-        // Optionally clear selection after move? User might want to keep selection to move again.
-        // setSelectedWallIds(new Set()); 
     };
 
-    if (isAuthLoading) {
+    if (isAuthLoading || isProfileLoading) {
         return (
             <div className="min-h-screen bg-slate-900 flex items-center justify-center">
                 <div className="flex flex-col items-center gap-4">
                     <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-slate-400 animate-pulse">Checking authentication...</span>
+                    <span className="text-slate-400 animate-pulse">
+                        {isAuthLoading ? 'Checking authentication...' : 'Verifying profile...'}
+                    </span>
                 </div>
             </div>
         );
@@ -1620,8 +1836,18 @@ const App: React.FC = () => {
         return <LandingPage onLogin={handleGoogleSignIn} />;
     }
 
+    // --- Approval Checks ---
+    if (userProfile && userProfile.status === 'pending') {
+        return <PendingApprovalScreen onSignOut={handleSignOut} />;
+    }
+    
+    if (userProfile && userProfile.status === 'rejected') {
+        return <RejectedScreen onSignOut={handleSignOut} />;
+    }
+
     return (
         <>
+            <AdminUserModal isOpen={isAdminModalOpen} onClose={() => setIsAdminModalOpen(false)} />
             <input type="file" ref={fileInputRef} onChange={handleLoadProjectFile} accept=".framingpro,.json" className="hidden" />
             <AddWallModal 
                 isOpen={isAddWallModalOpen}
@@ -1650,10 +1876,7 @@ const App: React.FC = () => {
                 <PopOutWindow title="Framing Plan Viewer" onClose={handleTogglePdfDetach}>
                      <PdfViewer 
                         file={activePdfFile} 
-                        onClose={handlePdfClose} // In popup, close means remove PDF entirely? Or just close popup? Close button in popup calls onClose -> handlePdfClose -> removes PDF.
-                        // Wait, user might just want to close the popup and attach back.
-                        // The 'onClose' prop in PdfViewer currently removes the file.
-                        // We should probably change PdfViewer header close button behavior if detached.
+                        onClose={handlePdfClose} 
                         onAddWall={handleAddWallFromPdf}
                         projectWalls={walls.filter(w => w.floorId === activeFloorId || (!w.floorId && activeFloorId === floors[0]?.id))}
                         wallToPlace={wallToPlace}
@@ -1672,7 +1895,7 @@ const App: React.FC = () => {
                         onPasteLayout={handlePasteLayout}
                         currentPage={pdfPageNum}
                         onPageChange={setPdfPageNum}
-                        savedScales={pdfScales}
+                        activeScale={activeFloor?.scale}
                         onSetScale={handleSetScale}
                         onDetach={handleTogglePdfDetach}
                         isDetached={true}
@@ -1720,6 +1943,13 @@ const App: React.FC = () => {
 
                                 <div className="w-px h-8 bg-slate-700 mx-1"></div>
                                 
+                                {isAdmin && (
+                                    <button onClick={() => setIsAdminModalOpen(true)} className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-semibold py-2 px-4 rounded-lg transition mr-1">
+                                        <div className="w-5 h-5 flex items-center justify-center">👑</div>
+                                        <span className="hidden md:inline">Manage Users</span>
+                                    </button>
+                                )}
+
                                 <button onClick={handleSignOut} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 px-4 rounded-lg transition border border-slate-600" title={`Signed in as ${user.email}`}>
                                     <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-xs font-bold overflow-hidden">
                                         {user.photoURL ? <img src={user.photoURL} alt="User" className="w-full h-full object-cover" /> : (user.email ? user.email[0].toUpperCase() : 'U')}
@@ -1735,18 +1965,20 @@ const App: React.FC = () => {
                              <div className="flex justify-between items-center mb-4">
                                 <div className="flex items-center gap-4">
                                     <h2 className="text-2xl font-semibold">Project Walls</h2>
-                                    {walls.length > 0 && (
-                                        <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
-                                            <input 
-                                                type="checkbox" 
-                                                onChange={handleSelectAllToggle}
-                                                checked={areAllSelected}
-                                                ref={el => { if (el) el.indeterminate = isPartiallySelected; }}
-                                                className="h-5 w-5 rounded bg-slate-700 border-slate-600 text-indigo-500 focus:ring-indigo-600"
-                                            />
-                                            Select All
-                                        </label>
+                                    {selectedWallIds.size > 0 && (
+                                        <button 
+                                            onClick={() => {
+                                                setSelectedWallIds(new Set());
+                                                setLastInteractedWallId(null);
+                                            }}
+                                            className="text-xs text-indigo-400 hover:text-indigo-300 font-medium bg-indigo-500/10 px-2 py-1 rounded border border-indigo-500/20 transition flex items-center gap-1"
+                                        >
+                                            <CloseIcon className="w-3 h-3" /> Deselect All ({selectedWallIds.size})
+                                        </button>
                                     )}
+                                    <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider hidden sm:block">
+                                        Shift + Click Range
+                                    </span>
                                 </div>
                                 <button onClick={() => setIsAddWallModalOpen(true)} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition">
                                     <PlusIcon className="w-5 h-5" /> Add Wall
@@ -1764,15 +1996,7 @@ const App: React.FC = () => {
                                         <table className="w-full text-left border-collapse">
                                             <thead>
                                                 <tr className="bg-slate-900 border-b border-slate-700 text-slate-400 text-xs uppercase tracking-wider">
-                                                    <th className="p-3 w-10 text-center">
-                                                        <input 
-                                                            type="checkbox" 
-                                                            onChange={handleSelectAllToggle}
-                                                            checked={areAllSelected}
-                                                            ref={el => { if (el) el.indeterminate = isPartiallySelected; }}
-                                                            className="h-4 w-4 rounded bg-slate-700 border-slate-600 text-indigo-500 focus:ring-indigo-600 cursor-pointer"
-                                                        />
-                                                    </th>
+                                                    <th className="p-3 w-10 text-center"></th>
                                                     <th className="p-3 font-semibold">Name</th>
                                                     <th className="p-3 font-semibold">Length</th>
                                                     <th className="p-3 font-semibold">Height</th>
@@ -1842,53 +2066,6 @@ const App: React.FC = () => {
                                                         )}
                                                     </React.Fragment>
                                                 ))}
-                                                {/* Fallback for walls with invalid floor IDs (shouldn't happen with current logic but safe to have) */}
-                                                 {(() => {
-                                                     const assignedIds = new Set(floors.map(f => f.id));
-                                                     const orphans = walls.filter(w => !w.floorId || !assignedIds.has(w.floorId));
-                                                     if (orphans.length === 0) return null;
-                                                     return (
-                                                        <>
-                                                             <tr className="bg-red-900/20 border-y border-red-900/50">
-                                                                <td colSpan={9} className="px-4 py-2 text-sm font-bold text-red-300">Unassigned / Invalid Floor</td>
-                                                            </tr>
-                                                             {orphans.map(wall => (
-                                                                 <WallRow 
-                                                                    key={wall.id}
-                                                                    node={{ wall, level: 0 }}
-                                                                    floors={floors}
-                                                                    walls={walls}
-                                                                    collapsedParents={collapsedParents}
-                                                                    draggedId={draggedId}
-                                                                    dragOverState={dragOverState}
-                                                                    wallsByFloor={wallsByFloor}
-                                                                    hasActivePdf={!!activePdfFile}
-                                                                    selectedIds={selectedWallIds}
-                                                                    isClicked={wall.id === clickedWallId}
-                                                                    getDescendantIds={getDescendantIds}
-                                                                    onToggleSelection={handleToggleWallSelection}
-                                                                    onWallClick={handleSetClickedWall}
-                                                                    onUpdateFloor={handleUpdateWallFloor}
-                                                                    onCopyProperties={handleCopyWallProperties}
-                                                                    toggleParent={toggleParent}
-                                                                    handleIndentWall={handleIndentWall}
-                                                                    handleOutdentWall={handleOutdentWall}
-                                                                    handleDragStart={handleDragStart}
-                                                                    handleDragOver={handleDragOver}
-                                                                    handleDragLeave={handleDragLeave}
-                                                                    handleDrop={handleDrop}
-                                                                    handleDragEnd={handleDragEnd}
-                                                                    setHighlightedWallId={setHighlightedWallId}
-                                                                    setWallToPlace={setWallToPlace}
-                                                                    setAssemblyWall={setAssemblyWall}
-                                                                    handleDuplicateWall={handleDuplicateWall}
-                                                                    setSelectedWall={setSelectedWall}
-                                                                    handleDeleteWall={handleDeleteWall}
-                                                                 />
-                                                             ))}
-                                                        </>
-                                                     )
-                                                 })()}
                                             </tbody>
                                         </table>
                                     </div>
@@ -2006,7 +2183,7 @@ const App: React.FC = () => {
                             onPasteLayout={handlePasteLayout}
                             currentPage={pdfPageNum}
                             onPageChange={setPdfPageNum}
-                            savedScales={pdfScales}
+                            activeScale={activeFloor?.scale}
                             onSetScale={handleSetScale}
                             onDetach={handleTogglePdfDetach}
                             isDetached={false}

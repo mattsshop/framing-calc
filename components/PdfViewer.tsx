@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import { CloseIcon, PlusIcon, ClipboardCopyIcon, ClipboardPasteIcon, ExternalLinkIcon } from './Icons';
+import { CloseIcon, PlusIcon, ClipboardCopyIcon, ClipboardPasteIcon, ExternalLinkIcon, RulerIcon } from './Icons';
 import type { Wall, Point } from '../types';
 
 // Set worker to a reliable CDN matching the installed API version to avoid mismatch errors
@@ -28,8 +28,8 @@ interface PdfViewerProps {
     onPasteLayout: (pastePoint: Point, pageNum: number) => void;
     currentPage: number;
     onPageChange: (pageNum: number) => void;
-    savedScales: Record<number, number>;
-    onSetScale: (pageNum: number, scale: number) => void;
+    activeScale?: number;
+    onSetScale: (scale: number) => void;
     onDetach?: () => void;
     isDetached?: boolean;
 }
@@ -112,7 +112,7 @@ const PageSelectorModal: React.FC<{
     );
 };
 
-const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, projectWalls, wallToPlace, onWallPlaced, highlightedWallId, clickedWallId, setClickedWallId, wallToFocusId, onFocusDone, onCopyWallDetails, onPasteWallDetails, selectedPdfWallIds, setSelectedPdfWallIds, copiedLayout, onCopyLayout, onPasteLayout, currentPage, onPageChange, savedScales, onSetScale, onDetach, isDetached }) => {
+const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, projectWalls, wallToPlace, onWallPlaced, highlightedWallId, clickedWallId, setClickedWallId, wallToFocusId, onFocusDone, onCopyWallDetails, onPasteWallDetails, selectedPdfWallIds, setSelectedPdfWallIds, copiedLayout, onCopyLayout, onPasteLayout, currentPage, onPageChange, activeScale, onSetScale, onDetach, isDetached }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const overlayRef = useRef<HTMLCanvasElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -137,7 +137,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, project
     // Zoom Logic Refs
     const zoomTarget = useRef<{ xRatio: number; yRatio: number; mouseX: number; mouseY: number } | null>(null);
     
-    const scaleRatio = savedScales[currentPage] || null;
+    const scaleRatio = activeScale || null;
     
     const wallsOnThisPage = useMemo(() =>
         projectWalls.filter(wall => wall.pdfPosition && wall.pdfPosition.pageNum === currentPage),
@@ -726,7 +726,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, project
         const totalInches = (ft * 12) + inches;
         if (normalizedDistance && totalInches > 0) {
             const ratio = totalInches / normalizedDistance;
-            onSetScale(currentPage, ratio);
+            onSetScale(ratio);
             setStatusMessage(`Scale set. Ready to measure.`);
         }
         setIsScaleModalOpen(false); setPoints([]);
@@ -811,13 +811,22 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ file, onClose, onAddWall, project
                         <button onClick={() => setIsPageSelectorOpen(true)} disabled={!pdfDoc || pdfDoc.numPages <= 1} className="px-3 py-1 bg-slate-700 rounded disabled:opacity-50 text-sm">Select Page</button>
                     </div>
                 </div>
-                <div className="flex items-center gap-1">
-                    {onDetach && (
-                         <button onClick={onDetach} className="p-2 rounded-full hover:bg-slate-700 text-slate-400 hover:text-white" title={isDetached ? "Attach to Main Window" : "Pop Out to New Window"}>
-                            <ExternalLinkIcon className="w-5 h-5" />
-                        </button>
-                    )}
-                    <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-700"><CloseIcon className="w-5 h-5" /></button>
+                <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 bg-indigo-900/40 px-3 py-1 rounded-full border border-indigo-500/30 text-xs shadow-inner">
+                        <RulerIcon className="w-3.5 h-3.5 text-indigo-400"/>
+                        <span className="text-slate-400 font-medium">Scale:</span>
+                        <span className="font-mono font-bold text-indigo-200">
+                            {scaleRatio ? `1 unit = ${scaleRatio.toFixed(3)}"` : 'Not Set'}
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                        {onDetach && (
+                             <button onClick={onDetach} className="p-2 rounded-full hover:bg-slate-700 text-slate-400 hover:text-white" title={isDetached ? "Attach to Main Window" : "Pop Out to New Window"}>
+                                <ExternalLinkIcon className="w-5 h-5" />
+                            </button>
+                        )}
+                        <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-700"><CloseIcon className="w-5 h-5" /></button>
+                    </div>
                 </div>
             </header>
             <div className="flex-grow overflow-auto relative" ref={scrollContainerRef}>

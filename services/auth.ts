@@ -1,12 +1,14 @@
 
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
+import 'firebase/compat/firestore';
 import { FIREBASE_CONFIG } from '../config';
 
 const firebaseConfig = FIREBASE_CONFIG;
 
 let app;
 let auth: firebase.auth.Auth | undefined;
+let db: firebase.firestore.Firestore | undefined;
 let googleProvider: firebase.auth.GoogleAuthProvider | undefined;
 
 // --- Mock Auth State Management ---
@@ -24,6 +26,7 @@ try {
             app = firebase.app();
         }
         auth = firebase.auth();
+        db = firebase.firestore();
         googleProvider = new firebase.auth.GoogleAuthProvider();
     }
 } catch (error) {
@@ -129,6 +132,69 @@ const onAuthStateChangedWrapper = (callback: (user: firebase.User | null) => voi
         if (unsubscribeFirebase) unsubscribeFirebase();
     };
 };
+
+// --- User Profile & Approval Logic ---
+
+export interface UserProfile {
+    uid: string;
+    email: string;
+    displayName: string;
+    photoURL: string;
+    status: 'pending' | 'approved' | 'rejected';
+    createdAt: any;
+}
+
+export const getUserProfile = async (uid: string): Promise<UserProfile | null> => {
+    if (!db) return null; // Fallback for mock mode or unconfigured DB
+    try {
+        const doc = await db.collection('users').doc(uid).get();
+        if (doc.exists) {
+            return doc.data() as UserProfile;
+        }
+        return null;
+    } catch (e) {
+        console.error("Error fetching user profile", e);
+        return null;
+    }
+};
+
+export const createUserProfile = async (user: firebase.User): Promise<UserProfile> => {
+    if (!db) {
+        // Mock mode fallback
+        return {
+            uid: user.uid,
+            email: user.email || '',
+            displayName: user.displayName || 'Guest',
+            photoURL: user.photoURL || '',
+            status: 'approved', // Mock users are auto-approved
+            createdAt: new Date()
+        };
+    }
+
+    const newProfile: UserProfile = {
+        uid: user.uid,
+        email: user.email || '',
+        displayName: user.displayName || 'User',
+        photoURL: user.photoURL || '',
+        status: 'pending', // Default to pending
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+
+    await db.collection('users').doc(user.uid).set(newProfile);
+    return newProfile;
+};
+
+export const getPendingUsers = async (): Promise<UserProfile[]> => {
+    if (!db) return [];
+    const snapshot = await db.collection('users').where('status', '==', 'pending').get();
+    return snapshot.docs.map(doc => doc.data() as UserProfile);
+};
+
+export const updateUserStatus = async (uid: string, status: 'approved' | 'rejected') => {
+    if (!db) return;
+    await db.collection('users').doc(uid).update({ status });
+};
+
 
 export { auth, onAuthStateChangedWrapper as onAuthStateChanged };
 export type User = firebase.User;
