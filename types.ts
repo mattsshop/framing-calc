@@ -42,7 +42,6 @@ export interface Floor {
     name: string;
     elevation: number; // inches from ground (0)
     pdfPage?: number; // The PDF page associated with this floor plan
-    scale?: number; // Inches per PDF point
 }
 
 export interface Wall {
