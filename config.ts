@@ -22,9 +22,3 @@ export const FIREBASE_CONFIG = {
   appId: "1:528108938610:web:f8c1ca81dc8b3ea2eae9eb",
   measurementId: "G-L9RTQSGT82"
 };
-
-// 3. Admin Emails
-// Add your Google email address here. Only these users can approve new sign-ups.
-export const ADMIN_EMAILS = [
-  "your-email@example.com" 
-];

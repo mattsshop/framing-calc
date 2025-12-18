@@ -1,0 +1,42 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if the user is an admin
+    function isAdmin() {
+      return request.auth != null && 
+             request.auth.token.email in ["your-email@example.com"]; // MUST MATCH config.ts ADMIN_EMAILS
+    }
+
+    // Helper to check if user document is approved
+    function isApproved() {
+      return request.auth != null && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'approved';
+    }
+
+    // Users collection rules
+    match /users/{uid} {
+      // Users can always read their own status doc
+      allow read: if request.auth != null && request.auth.uid == uid;
+      
+      // Users can create their own doc on first sign-in (pending status only)
+      allow create: if request.auth != null && 
+                    request.auth.uid == uid && 
+                    request.resource.data.status == 'pending';
+      
+      // Only Admins can list all users or update user statuses
+      allow list, update: if isAdmin();
+      
+      // Prevent users from deleting their profiles
+      allow delete: if isAdmin();
+    }
+
+    // Generic rule for app data (Change these to your collection names like 'projects', 'walls', etc.)
+    match /{path=**} {
+      // By default, only approved users or admins can read/write any other data
+      allow read, write: if isAdmin() || isApproved();
+    }
+  }
+}

@@ -11,18 +11,7 @@ import { getProTip } from './services/geminiService';
 import { generateMaterialListPdf, generateMaterialReportPdf, drawWallOnCanvas } from './services/pdfService';
 import { generateSketchUpScript } from './services/sketchupService';
 import { generatePlyModel } from './services/exportService';
-import { 
-    signInWithGoogle, 
-    signOut, 
-    onAuthStateChanged, 
-    getUserProfile, 
-    createUserProfile, 
-    getPendingUsers, 
-    updateUserStatus,
-    type User, 
-    type UserProfile 
-} from './services/auth';
-import { ADMIN_EMAILS } from './config';
+import { signInWithGoogle, signOut, onAuthStateChanged, type User } from './services/auth';
 import { PlusIcon, TrashIcon, EditIcon, DuplicateIcon, ProjectIcon, DownloadIcon, PdfIcon, CloseIcon, CubeIcon, MapPinIcon, DocumentReportIcon, AssemblyViewIcon, SketchupIcon, SaveIcon, LoadIcon, ChevronDownIcon, ChevronRightIcon, ArrowRightIcon, ArrowLeftIcon, GripVerticalIcon, SparklesIcon, FolderIcon, ClipboardCopyIcon, ClipboardPasteIcon, GoogleIcon, LogoutIcon } from './components/Icons';
 
 const generateId = () => `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -76,127 +65,6 @@ const formatHeight = (inches: number) => {
     if (Math.abs(inches - 109.125) < 0.01) return "9' 1 1/8\"";
     return formatLengthFeetInches(inches);
 };
-
-// --- Components ---
-
-const AdminUserModal: React.FC<{
-    isOpen: boolean;
-    onClose: () => void;
-}> = ({ isOpen, onClose }) => {
-    const [pendingUsers, setPendingUsers] = useState<UserProfile[]>([]);
-    const [loading, setLoading] = useState(false);
-
-    useEffect(() => {
-        if (isOpen) {
-            loadPendingUsers();
-        }
-    }, [isOpen]);
-
-    const loadPendingUsers = async () => {
-        setLoading(true);
-        const users = await getPendingUsers();
-        setPendingUsers(users);
-        setLoading(false);
-    };
-
-    const handleAction = async (uid: string, status: 'approved' | 'rejected') => {
-        await updateUserStatus(uid, status);
-        await loadPendingUsers();
-    };
-
-    if (!isOpen) return null;
-
-    return (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm" onClick={onClose}>
-            <div className="bg-slate-800 rounded-lg shadow-2xl p-6 w-full max-w-2xl m-4 border border-slate-700" onClick={e => e.stopPropagation()}>
-                <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-2xl font-bold text-white">Pending Approvals</h2>
-                    <button onClick={onClose}><CloseIcon className="w-5 h-5 text-slate-400 hover:text-white"/></button>
-                </div>
-                
-                {loading ? (
-                    <div className="text-center py-8 text-slate-400">Loading pending users...</div>
-                ) : pendingUsers.length === 0 ? (
-                    <div className="text-center py-8 bg-slate-900/50 rounded-lg border border-slate-700 border-dashed text-slate-400">
-                        No pending users found.
-                    </div>
-                ) : (
-                    <div className="space-y-3 max-h-[60vh] overflow-y-auto">
-                        {pendingUsers.map(user => (
-                            <div key={user.uid} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-slate-700/50 rounded-lg border border-slate-600 gap-4">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-full bg-slate-600 overflow-hidden">
-                                        {user.photoURL ? <img src={user.photoURL} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-400 font-bold">{user.displayName?.[0]}</div>}
-                                    </div>
-                                    <div>
-                                        <div className="font-semibold text-white">{user.displayName}</div>
-                                        <div className="text-sm text-slate-400">{user.email}</div>
-                                    </div>
-                                </div>
-                                <div className="flex gap-2 w-full sm:w-auto">
-                                    <button 
-                                        onClick={() => handleAction(user.uid, 'approved')}
-                                        className="flex-1 sm:flex-none px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-medium transition"
-                                    >
-                                        Approve
-                                    </button>
-                                    <button 
-                                        onClick={() => handleAction(user.uid, 'rejected')}
-                                        className="flex-1 sm:flex-none px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-medium transition"
-                                    >
-                                        Reject
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-}
-
-const PendingApprovalScreen: React.FC<{ onSignOut: () => void }> = ({ onSignOut }) => (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
-        <div className="max-w-md w-full bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700 text-center">
-            <div className="w-16 h-16 bg-yellow-500/20 text-yellow-500 rounded-full flex items-center justify-center mx-auto mb-6">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-8 h-8">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-            </div>
-            <h2 className="text-2xl font-bold text-white mb-2">Approval Pending</h2>
-            <p className="text-slate-400 mb-8">
-                Your account has been created and is waiting for administrator approval. You will gain access once an admin approves your request.
-            </p>
-            <button 
-                onClick={onSignOut}
-                className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white font-semibold rounded-lg transition"
-            >
-                Sign Out
-            </button>
-        </div>
-    </div>
-);
-
-const RejectedScreen: React.FC<{ onSignOut: () => void }> = ({ onSignOut }) => (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
-        <div className="max-w-md w-full bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700 text-center">
-            <div className="w-16 h-16 bg-red-500/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
-                <CloseIcon className="w-8 h-8" />
-            </div>
-            <h2 className="text-2xl font-bold text-white mb-2">Access Denied</h2>
-            <p className="text-slate-400 mb-8">
-                Your account request has been declined by an administrator. Please contact support if you believe this is an error.
-            </p>
-            <button 
-                onClick={onSignOut}
-                className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white font-semibold rounded-lg transition"
-            >
-                Sign Out
-            </button>
-        </div>
-    </div>
-);
 
 const AddWallModal: React.FC<{
     isOpen: boolean;
@@ -271,7 +139,6 @@ const AddWallModal: React.FC<{
     );
 };
 
-// ... (Rest of existing data helper functions: dataURLtoFile, fileToDataUrl)
 const dataURLtoFile = (dataurl: string, filename: string): File => {
     const arr = dataurl.split(',');
     const mimeMatch = arr[0].match(/:(.*?);/);
@@ -777,8 +644,6 @@ const WallRow: React.FC<WallRowProps> = ({
     );
 };
 
-// --- App Component ---
-
 const App: React.FC = () => {
     const [walls, setWalls] = useState<Wall[]>([]);
     const [floors, setFloors] = useState<Floor[]>([{ id: 'floor-1', name: '1st Floor', elevation: 0 }]);
@@ -791,12 +656,7 @@ const App: React.FC = () => {
     // Auth State
     const [user, setUser] = useState<User | null>(null);
     const [isAuthLoading, setIsAuthLoading] = useState(true);
-    const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-    const [isProfileLoading, setIsProfileLoading] = useState(false);
-    
-    // Admin State
-    const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
-    
+
     // Updated: Store PDF file per floor
     const [floorPdfs, setFloorPdfs] = useState<Record<string, File>>({});
     
@@ -838,33 +698,12 @@ const App: React.FC = () => {
     const [isPdfDetached, setIsPdfDetached] = useState(false);
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(async (currentUser) => {
-            setUser(currentUser);
-            if (currentUser) {
-                setIsProfileLoading(true);
-                // 1. Get existing profile
-                let profile = await getUserProfile(currentUser.uid);
-                
-                // 2. If no profile exists, create one (status: pending)
-                if (!profile) {
-                    profile = await createUserProfile(currentUser);
-                }
-                
-                // 3. Set profile state
-                setUserProfile(profile);
-                setIsProfileLoading(false);
-            } else {
-                setUserProfile(null);
-            }
+        const unsubscribe = onAuthStateChanged((user) => {
+            setUser(user);
             setIsAuthLoading(false);
         });
         return () => unsubscribe();
     }, []);
-
-    const isAdmin = useMemo(() => {
-        if (!user || !user.email) return false;
-        return ADMIN_EMAILS.includes(user.email);
-    }, [user]);
 
     const handleGoogleSignIn = async () => {
         try {
@@ -1766,14 +1605,12 @@ const App: React.FC = () => {
         // setSelectedWallIds(new Set()); 
     };
 
-    if (isAuthLoading || isProfileLoading) {
+    if (isAuthLoading) {
         return (
             <div className="min-h-screen bg-slate-900 flex items-center justify-center">
                 <div className="flex flex-col items-center gap-4">
                     <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-slate-400 animate-pulse">
-                        {isAuthLoading ? 'Checking authentication...' : 'Verifying profile...'}
-                    </span>
+                    <span className="text-slate-400 animate-pulse">Checking authentication...</span>
                 </div>
             </div>
         );
@@ -1783,20 +1620,8 @@ const App: React.FC = () => {
         return <LandingPage onLogin={handleGoogleSignIn} />;
     }
 
-    // --- Approval Checks ---
-    if (userProfile && userProfile.status === 'pending') {
-        return <PendingApprovalScreen onSignOut={handleSignOut} />;
-    }
-    
-    if (userProfile && userProfile.status === 'rejected') {
-        return <RejectedScreen onSignOut={handleSignOut} />;
-    }
-
-    // Default to approved logic if mock or approved
-
     return (
         <>
-            <AdminUserModal isOpen={isAdminModalOpen} onClose={() => setIsAdminModalOpen(false)} />
             <input type="file" ref={fileInputRef} onChange={handleLoadProjectFile} accept=".framingpro,.json" className="hidden" />
             <AddWallModal 
                 isOpen={isAddWallModalOpen}
@@ -1895,13 +1720,6 @@ const App: React.FC = () => {
 
                                 <div className="w-px h-8 bg-slate-700 mx-1"></div>
                                 
-                                {isAdmin && (
-                                    <button onClick={() => setIsAdminModalOpen(true)} className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-semibold py-2 px-4 rounded-lg transition mr-1">
-                                        <div className="w-5 h-5 flex items-center justify-center">👑</div>
-                                        <span className="hidden md:inline">Manage Users</span>
-                                    </button>
-                                )}
-
                                 <button onClick={handleSignOut} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 px-4 rounded-lg transition border border-slate-600" title={`Signed in as ${user.email}`}>
                                     <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-xs font-bold overflow-hidden">
                                         {user.photoURL ? <img src={user.photoURL} alt="User" className="w-full h-full object-cover" /> : (user.email ? user.email[0].toUpperCase() : 'U')}
